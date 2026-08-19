@@ -1,0 +1,16 @@
+# V1 Checklist
+- [x] App shell
+- [x] Business rules
+- [x] Database model
+- [x] User roles
+- [ ] Supabase project
+- [ ] Authentication
+- [ ] Secure document storage
+- [ ] Client CRM
+- [ ] Manufacturer setup
+- [ ] Quote workflow
+- [ ] Inventory ledger UI
+- [ ] Daily Cash UI
+- [ ] PO / acknowledgement workflow
+- [ ] Reports
+- [ ] QuickBooks
