@@ -23,3 +23,4 @@ Connect this repository to Supabase for:
 2. PostgreSQL database
 3. secure file storage
 4. first live Client / Manufacturer / Quote workflow
+Initial Vercel deployment
