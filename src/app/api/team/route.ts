@@ -1,4 +1,4 @@
-"use server";
+import { randomBytes } from "crypto";
 
 import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
