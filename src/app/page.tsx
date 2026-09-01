@@ -2592,6 +2592,8 @@ export default function Home() {
     useState<PriceList[]>([]);
   const [priceListItems, setPriceListItems] =
     useState<PriceListItem[]>([]);
+  const [quotePriceListItems, setQuotePriceListItems] =
+    useState<PriceListItem[]>([]);
   const [priceListSearch, setPriceListSearch] =
     useState("");
   const [priceListLoading, setPriceListLoading] =
@@ -3751,6 +3753,55 @@ export default function Home() {
     loadPriceLists,
     loadAcknowledgementLibrary,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadQuotePriceListItems() {
+      if (!supabase || !session?.user?.id) {
+        setQuotePriceListItems([]);
+        return;
+      }
+
+      const approvedListIds = priceLists
+        .filter(
+          (priceList) =>
+            priceList.active !== false &&
+            priceList.approved_for_pricing === true
+        )
+        .map((priceList) => priceList.id);
+
+      if (approvedListIds.length === 0) {
+        setQuotePriceListItems([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("price_list_items")
+        .select(priceListItemColumns)
+        .in("price_list_id", approvedListIds)
+        .eq("active", true)
+        .order("sku", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        setMessage(
+          `Could not load quote price list products: ${error.message}`
+        );
+        setQuotePriceListItems([]);
+        return;
+      }
+
+      setQuotePriceListItems((data || []) as PriceListItem[]);
+    }
+
+    loadQuotePriceListItems();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, session?.user?.id, priceLists]);
 
   const filteredAcknowledgements = useMemo(() => {
     const term = acknowledgementSearch.trim().toLowerCase();
@@ -6367,6 +6418,62 @@ export default function Home() {
         }
 
         return next;
+      })
+    );
+  }
+
+  function quotePriceListLabel(item: PriceListItem) {
+    return [
+      item.sku,
+      item.product_name || item.description || "Price list item",
+      item.grade ? `Grade ${item.grade}` : "",
+    ]
+      .filter(Boolean)
+      .join(" — ");
+  }
+
+  function applyQuotePriceListItem(
+    localId: string,
+    priceListItem: PriceListItem
+  ) {
+    setQuoteItems((current) =>
+      current.map((existing) => {
+        if (existing.local_id !== localId) return existing;
+
+        const manufacturer = manufacturers.find(
+          (entry) => entry.id === priceListItem.manufacturer_id
+        );
+        const description = [
+          priceListItem.product_name,
+          priceListItem.description,
+        ]
+          .filter(Boolean)
+          .join(" — ");
+
+        return calculateQuoteItem(
+          {
+            ...existing,
+            manufacturer_id: priceListItem.manufacturer_id,
+            sku: priceListItem.sku || "",
+            description: description || existing.description,
+            grade: priceListItem.grade || "",
+            msrp_at_grade: numberOrZero(priceListItem.msrp),
+            discount_pct: numberOrZero(
+              manufacturer?.default_discount_pct
+            ),
+            purchasing_factor_snapshot:
+              manufacturer?.purchasing_factor == null
+                ? null
+                : Number(manufacturer.purchasing_factor),
+            tariff_pct_snapshot: numberOrZero(
+              manufacturer?.tariff_pct
+            ),
+            surcharge_pct_snapshot: numberOrZero(
+              manufacturer?.surcharge_pct
+            ),
+          },
+          manufacturer
+        );
       })
     );
   }
@@ -23577,6 +23684,12 @@ export default function Home() {
                       (manufacturer) =>
                         manufacturer.id === item.manufacturer_id
                     );
+                    const manufacturerPriceListItems =
+                      quotePriceListItems.filter(
+                        (priceListItem) =>
+                          priceListItem.manufacturer_id ===
+                          item.manufacturer_id
+                      );
                     const extended =
                       numberOrZero(item.quantity) *
                       numberOrZero(item.unit_price);
@@ -23640,6 +23753,54 @@ export default function Home() {
                                   </option>
                                 ))}
                             </select>
+                          </FormField>
+
+                          <FormField
+                            label="Price List Product"
+                            wide
+                          >
+                            <input
+                              key={`${item.local_id}-${item.manufacturer_id}`}
+                              list={`quote-price-list-${item.local_id}`}
+                              disabled={!item.manufacturer_id}
+                              placeholder={
+                                !item.manufacturer_id
+                                  ? "Choose a manufacturer first"
+                                  : manufacturerPriceListItems.length === 0
+                                    ? "No approved price list products"
+                                    : "Search by SKU or product name"
+                              }
+                              onChange={(event) => {
+                                const selected =
+                                  manufacturerPriceListItems.find(
+                                    (priceListItem) =>
+                                      quotePriceListLabel(
+                                        priceListItem
+                                      ) === event.target.value
+                                  );
+
+                                if (selected) {
+                                  applyQuotePriceListItem(
+                                    item.local_id,
+                                    selected
+                                  );
+                                }
+                              }}
+                            />
+                            <datalist
+                              id={`quote-price-list-${item.local_id}`}
+                            >
+                              {manufacturerPriceListItems.map(
+                                (priceListItem) => (
+                                  <option
+                                    key={priceListItem.id}
+                                    value={quotePriceListLabel(
+                                      priceListItem
+                                    )}
+                                  />
+                                )
+                              )}
+                            </datalist>
                           </FormField>
 
                           <FormField label="Qty">
