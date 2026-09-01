@@ -2219,8 +2219,12 @@ function calculateSaleItem(
 
 export default function Home() {
   const supabase = useMemo(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const directUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    const url =
+      directUrl && typeof window !== "undefined"
+        ? `${window.location.origin}/supabase`
+        : directUrl;
 
     return url && key ? createClient(url, key) : null;
   }, []);
@@ -2728,10 +2732,42 @@ export default function Home() {
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+    let active = true;
+    const connectionTimeout = window.setTimeout(() => {
+      if (!active) return;
+      setMessage(
+        "The connection took too long. Please sign in again."
+      );
       setLoading(false);
-    });
+    }, 8000);
+
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!active) return;
+
+        if (error) {
+          setMessage(`Connection error: ${error.message}`);
+          setSession(null);
+          return;
+        }
+
+        setSession(data.session);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setMessage(
+          error instanceof Error
+            ? `Connection error: ${error.message}`
+            : "Could not connect to the Hub. Please sign in again."
+        );
+        setSession(null);
+      })
+      .finally(() => {
+        if (!active) return;
+        window.clearTimeout(connectionTimeout);
+        setLoading(false);
+      });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
@@ -2739,7 +2775,11 @@ export default function Home() {
       }
     );
 
-    return () => listener.subscription.unsubscribe();
+    return () => {
+      active = false;
+      window.clearTimeout(connectionTimeout);
+      listener.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const loadProfile = useCallback(async () => {
