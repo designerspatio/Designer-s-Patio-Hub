@@ -6786,16 +6786,26 @@ export default function Home() {
 
     const col = {
       x: 32,
-      image: 62,
-      item: 34,
-      sku: 64,
-      description: 201,
-      qty: 40,
-      unit: 73,
+      image: 50,
+      item: 28,
+      sku: 55,
+      description: 133,
+      qty: 28,
+      msrp: 60,
+      discount: 45,
+      unit: 75,
       total: 74,
     };
     const tableWidth =
-      col.image + col.item + col.sku + col.description + col.qty + col.unit + col.total;
+      col.image +
+      col.item +
+      col.sku +
+      col.description +
+      col.qty +
+      col.msrp +
+      col.discount +
+      col.unit +
+      col.total;
 
     const drawTableHeader = (top: number) => {
       fillRect(col.x, top, tableWidth, 22, NAVY);
@@ -6806,7 +6816,9 @@ export default function Home() {
         ["SKU", col.sku],
         ["DESCRIPTION", col.description],
         ["QTY", col.qty],
-        ["UNIT PRICE", col.unit],
+        ["MSRP", col.msrp],
+        ["DISC.", col.discount],
+        ["NET UNIT", col.unit],
         ["TOTAL", col.total],
       ];
 
@@ -6858,7 +6870,16 @@ export default function Home() {
       strokeRect(col.x, cursorTop, tableWidth, rowHeight, [0.82, 0.85, 0.87], 0.45);
 
       let x = col.x;
-      const widths = [col.image, col.item, col.sku, col.description, col.qty, col.unit];
+      const widths = [
+        col.image,
+        col.item,
+        col.sku,
+        col.description,
+        col.qty,
+        col.msrp,
+        col.discount,
+        col.unit,
+      ];
       widths.forEach((width) => {
         x += width;
         lineAt(x, cursorTop, x, cursorTop + rowHeight, 0.35, [0.84, 0.87, 0.89]);
@@ -6891,6 +6912,26 @@ export default function Home() {
       cx += col.description;
       textAt(cx + col.qty / 2 - 2, cursorTop + 20, String(qty), 7.5, true, DARK);
       cx += col.qty;
+      textAt(
+        cx + col.msrp - 7,
+        cursorTop + 20,
+        money(numberOrZero(item.msrp_at_grade)),
+        6.8,
+        false,
+        DARK,
+        "right"
+      );
+      cx += col.msrp;
+      textAt(
+        cx + col.discount - 7,
+        cursorTop + 20,
+        `${numberOrZero(item.discount_pct).toFixed(1)}%`,
+        6.8,
+        false,
+        DARK,
+        "right"
+      );
+      cx += col.discount;
       textAt(cx + col.unit - 7, cursorTop + 20, money(numberOrZero(item.unit_price)), 7.2, true, DARK, "right");
       cx += col.unit;
       textAt(cx + col.total - 7, cursorTop + 20, money(extended), 7.2, true, DARK, "right");
@@ -7855,9 +7896,10 @@ export default function Home() {
       }));
 
     if (itemPayloads.length > 0) {
-      const { error: itemError } = await supabase
+      const { data: savedItems, error: itemError } = await supabase
         .from("quote_items")
-        .insert(itemPayloads);
+        .insert(itemPayloads)
+        .select(quoteItemColumns);
 
       if (itemError) {
         setMessage(
@@ -7866,6 +7908,27 @@ export default function Home() {
         setSavingQuote(false);
         return;
       }
+
+      // Keep the editor aligned with the rows that were just inserted.
+      // This is important because saving replaces the quote-item rows; stale
+      // IDs can otherwise break the later quote-to-sale conversion.
+      setQuoteItems(
+        ((savedItems || []) as Array<Omit<QuoteItem, "local_id">>)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((item) => ({
+            ...item,
+            local_id: item.id || newLocalId(),
+            manufacturer_id: item.manufacturer_id || "",
+            quantity: String(Math.max(1, numberOrZero(item.quantity))),
+            image_url: item.image_url || "",
+            sku: item.sku || "",
+            description: item.description || "",
+            finish: item.finish || "",
+            fabric_name: item.fabric_name || "",
+            grade: item.grade || "",
+            additional_details: item.additional_details || "",
+          }))
+      );
     }
 
     await loadQuotes();
@@ -8346,6 +8409,26 @@ export default function Home() {
       return;
     }
 
+    const convertibleItems = quoteItems.filter(
+      (item) =>
+        item.manufacturer_id ||
+        item.sku.trim() ||
+        item.description.trim() ||
+        numberOrZero(item.msrp_at_grade) > 0
+    );
+    const unassignedItemNumbers = convertibleItems
+      .map((item, index) => (!item.manufacturer_id ? index + 1 : null))
+      .filter((itemNumber): itemNumber is number => itemNumber !== null);
+
+    if (unassignedItemNumbers.length > 0) {
+      setMessage(
+        `Choose a manufacturer for item${
+          unassignedItemNumbers.length === 1 ? "" : "s"
+        } ${unassignedItemNumbers.join(", ")} before converting. Manufacturer assignments are required to generate purchase orders.`
+      );
+      return;
+    }
+
     const confirmed = window.confirm(
       `Convert Quote #${selectedQuote.quote_number} to a sales order?`
     );
@@ -8413,46 +8496,45 @@ export default function Home() {
 
     const sale = saleData as SalesOrder;
 
-    const saleItemPayloads = quoteItems
-      .filter(
-        (item) =>
-          item.manufacturer_id ||
-          item.sku.trim() ||
-          item.description.trim() ||
-          numberOrZero(item.msrp_at_grade) > 0
-      )
-      .map((item, index) => ({
+    const saleItemPayloads = convertibleItems.map((item, index) => {
+      const manufacturer = manufacturers.find(
+        (entry) => entry.id === item.manufacturer_id
+      );
+      const calculatedItem = calculateQuoteItem(item, manufacturer);
+
+      return {
         sales_order_id: sale.id,
-        source_quote_item_id: item.id || null,
-        manufacturer_id: item.manufacturer_id || null,
+        source_quote_item_id: calculatedItem.id || null,
+        manufacturer_id: calculatedItem.manufacturer_id,
         sort_order: index,
-        quantity: Math.max(1, numberOrZero(item.quantity)),
-        image_url: item.image_url.trim() || null,
-        sku: item.sku.trim() || null,
-        description: item.description.trim() || null,
-        finish: item.finish.trim() || null,
-        fabric_name: item.fabric_name.trim() || null,
-        grade: item.grade.trim() || null,
+        quantity: Math.max(1, numberOrZero(calculatedItem.quantity)),
+        image_url: calculatedItem.image_url.trim() || null,
+        sku: calculatedItem.sku.trim() || null,
+        description: calculatedItem.description.trim() || null,
+        finish: calculatedItem.finish.trim() || null,
+        fabric_name: calculatedItem.fabric_name.trim() || null,
+        grade: calculatedItem.grade.trim() || null,
         additional_details:
-          item.additional_details.trim() || null,
-        msrp_at_grade: numberOrZero(item.msrp_at_grade),
-        discount_pct: numberOrZero(item.discount_pct),
-        unit_price: numberOrZero(item.unit_price),
+          calculatedItem.additional_details.trim() || null,
+        msrp_at_grade: numberOrZero(calculatedItem.msrp_at_grade),
+        discount_pct: numberOrZero(calculatedItem.discount_pct),
+        unit_price: numberOrZero(calculatedItem.unit_price),
         purchasing_factor_snapshot:
-          item.purchasing_factor_snapshot,
+          calculatedItem.purchasing_factor_snapshot,
         tariff_pct_snapshot: numberOrZero(
-          item.tariff_pct_snapshot
+          calculatedItem.tariff_pct_snapshot
         ),
         surcharge_pct_snapshot: numberOrZero(
-          item.surcharge_pct_snapshot
+          calculatedItem.surcharge_pct_snapshot
         ),
-        expected_unit_cost: item.expected_unit_cost,
+        expected_unit_cost: calculatedItem.expected_unit_cost,
         acknowledged_unit_cost: null,
-        commissionable: item.commissionable,
+        commissionable: calculatedItem.commissionable,
         fulfillment_method: "Special Order",
         inventory_item_id: null,
         updated_at: new Date().toISOString(),
-      }));
+      };
+    });
 
     const { data: insertedItems, error: itemError } = await supabase
       .from("sales_order_items")
@@ -8467,6 +8549,27 @@ export default function Home() {
 
       setMessage(
         `Sale header was created, but line items failed: ${itemError.message}`
+      );
+      setConvertingQuote(false);
+      return;
+    }
+
+    const convertedItems = (insertedItems || []) as SalesOrderItem[];
+    const manufacturerWasDropped = convertedItems.some(
+      (item, index) =>
+        item.manufacturer_id !== saleItemPayloads[index]?.manufacturer_id
+    );
+
+    if (
+      convertedItems.length !== saleItemPayloads.length ||
+      manufacturerWasDropped
+    ) {
+      await supabase
+        .from("sales_orders")
+        .delete()
+        .eq("id", sale.id);
+      setMessage(
+        "The sale was not converted because a manufacturer assignment did not carry over. The quote is unchanged; please try again."
       );
       setConvertingQuote(false);
       return;
@@ -8943,6 +9046,24 @@ export default function Home() {
 
     if (!saleEditForm.client_id) {
       setMessage("A sales order needs a client.");
+      return;
+    }
+
+    const unassignedSpecialOrderLines = saleEditItems
+      .map((item, index) =>
+        item.fulfillment_method === "Special Order" &&
+        !item.manufacturer_id
+          ? index + 1
+          : null
+      )
+      .filter((itemNumber): itemNumber is number => itemNumber !== null);
+
+    if (unassignedSpecialOrderLines.length > 0) {
+      setMessage(
+        `Choose a manufacturer for special-order item${
+          unassignedSpecialOrderLines.length === 1 ? "" : "s"
+        } ${unassignedSpecialOrderLines.join(", ")} before saving. Manufacturer assignments are required to generate purchase orders.`
+      );
       return;
     }
 
@@ -23501,7 +23622,9 @@ export default function Home() {
                               {manufacturers
                                 .filter(
                                   (manufacturer) =>
-                                    manufacturer.active !== false
+                                    manufacturer.active !== false ||
+                                    manufacturer.id ===
+                                      item.manufacturer_id
                                 )
                                 .map((manufacturer) => (
                                   <option
@@ -23509,6 +23632,9 @@ export default function Home() {
                                     value={manufacturer.id}
                                   >
                                     {manufacturer.name}
+                                    {manufacturer.active === false
+                                      ? " (Inactive)"
+                                      : ""}
                                   </option>
                                 ))}
                             </select>
@@ -24233,7 +24359,9 @@ export default function Home() {
                               {manufacturers
                                 .filter(
                                   (manufacturer) =>
-                                    manufacturer.active !== false
+                                    manufacturer.active !== false ||
+                                    manufacturer.id ===
+                                      item.manufacturer_id
                                 )
                                 .map((manufacturer) => (
                                   <option
@@ -24241,6 +24369,9 @@ export default function Home() {
                                     value={manufacturer.id}
                                   >
                                     {manufacturer.name}
+                                    {manufacturer.active === false
+                                      ? " (Inactive)"
+                                      : ""}
                                   </option>
                                 ))}
                             </select>
