@@ -2741,9 +2741,11 @@ export default function Home() {
       setLoading(false);
     }, 8000);
 
+    let initializingSession = true;
+
     supabase.auth
       .getSession()
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (!active) return;
 
         if (error) {
@@ -2752,7 +2754,26 @@ export default function Home() {
           return;
         }
 
-        setSession(data.session);
+        if (!data.session) {
+          setSession(null);
+          return;
+        }
+
+        const { data: refreshed, error: refreshError } =
+          await supabase.auth.refreshSession(data.session);
+
+        if (!active) return;
+
+        if (refreshError || !refreshed.session) {
+          await supabase.auth.signOut({ scope: "local" });
+          setMessage(
+            "Your saved session expired. Please sign in again."
+          );
+          setSession(null);
+          return;
+        }
+
+        setSession(refreshed.session);
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -2765,12 +2786,16 @@ export default function Home() {
       })
       .finally(() => {
         if (!active) return;
+        initializingSession = false;
         window.clearTimeout(connectionTimeout);
         setLoading(false);
       });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, nextSession) => {
+      (event, nextSession) => {
+        if (event === "INITIAL_SESSION" && initializingSession) {
+          return;
+        }
         setSession(nextSession);
       }
     );
