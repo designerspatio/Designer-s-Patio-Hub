@@ -2743,6 +2743,44 @@ export default function Home() {
 
     let initializingSession = true;
 
+    const finishInitialization = () => {
+      if (!active) return;
+      initializingSession = false;
+      window.clearTimeout(connectionTimeout);
+      setLoading(false);
+    };
+
+    const sessionNeedsRefresh = (currentSession: Session) => {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const expiresAt = currentSession.expires_at ?? 0;
+
+      // Refresh expired/nearly-expired tokens. Also refresh tokens issued by a
+      // clock that is meaningfully ahead of the browser; Supabase otherwise
+      // rejects them as "JWT issued at future".
+      let issuedAt = 0;
+      try {
+        const payload = JSON.parse(
+          window.atob(
+            currentSession.access_token
+              .split(".")[1]
+              .replace(/-/g, "+")
+              .replace(/_/g, "/")
+              .padEnd(
+                Math.ceil(
+                  currentSession.access_token.split(".")[1].length / 4
+                ) * 4,
+                "="
+              )
+          )
+        ) as { iat?: number };
+        issuedAt = Number(payload.iat || 0);
+      } catch {
+        // A malformed token will be rejected by Supabase on the next request.
+      }
+
+      return expiresAt <= nowSeconds + 60 || issuedAt > nowSeconds + 30;
+    };
+
     supabase.auth
       .getSession()
       .then(async ({ data, error }) => {
@@ -2759,13 +2797,32 @@ export default function Home() {
           return;
         }
 
-        const { data: refreshed, error: refreshError } =
-          await supabase.auth.refreshSession(data.session);
+        if (!sessionNeedsRefresh(data.session)) {
+          setSession(data.session);
+          return;
+        }
+
+        const refreshResult = await Promise.race([
+          supabase.auth.refreshSession(data.session),
+          new Promise<null>((resolve) =>
+            window.setTimeout(() => resolve(null), 7000)
+          ),
+        ]);
 
         if (!active) return;
 
+        if (!refreshResult) {
+          setMessage(
+            "The saved session could not be refreshed. Please sign in again."
+          );
+          setSession(null);
+          return;
+        }
+
+        const { data: refreshed, error: refreshError } = refreshResult;
+
         if (refreshError || !refreshed.session) {
-          await supabase.auth.signOut({ scope: "local" });
+          void supabase.auth.signOut({ scope: "local" });
           setMessage(
             "Your saved session expired. Please sign in again."
           );
@@ -2785,10 +2842,7 @@ export default function Home() {
         setSession(null);
       })
       .finally(() => {
-        if (!active) return;
-        initializingSession = false;
-        window.clearTimeout(connectionTimeout);
-        setLoading(false);
+        finishInitialization();
       });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
@@ -4917,6 +4971,11 @@ export default function Home() {
           result.payload?.error ||
           "Team management could not be loaded.";
 
+        // Keep the screen useful when the admin endpoint is unavailable.
+        // The regular profile query is read-only, but it is enough to show
+        // the existing team instead of incorrectly claiming there are none.
+        setAdminTeam(team);
+
         if (!quiet) {
           setMessage(errorMessage);
         }
@@ -4939,6 +4998,7 @@ export default function Home() {
         );
       }
     } catch (error) {
+      setAdminTeam(team);
       if (!quiet) {
         setMessage(
           error instanceof Error
@@ -17992,7 +18052,7 @@ export default function Home() {
                 onClick={async () => {
                   setView("team");
                   setMessage("");
-                  await loadAdminTeam(true);
+                  await loadAdminTeam(false);
                 }}
               >
                 <span>⚙</span>
