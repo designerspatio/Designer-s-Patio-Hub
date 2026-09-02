@@ -5,11 +5,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
-type View = "dashboard" | "clients" | "manufacturers" | "quotes" | "sales" | "purchase_orders" | "inventory" | "daily_cash" | "accounting" | "catalogs" | "price_lists" | "ai_finder" | "acknowledgements" | "reports" | "team";
+type View = "dashboard" | "clients" | "scan" | "manufacturers" | "quotes" | "sales" | "purchase_orders" | "inventory" | "daily_cash" | "accounting" | "catalogs" | "price_lists" | "ai_finder" | "acknowledgements" | "reports" | "team" | "settings";
 type ClientMode = "view" | "edit" | "new";
 type ManufacturerMode = "view" | "edit" | "new";
 
@@ -1717,6 +1718,39 @@ type ClientForm = {
   tax_exempt: boolean;
 };
 
+type ScannedClient = {
+  buyer_id: string;
+  first_name: string;
+  last_name: string;
+  company_name: string;
+  business_type: string;
+  street_address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  phone: string;
+  email: string;
+  raw: string;
+};
+
+type HubSettings = {
+  quote_phone: string;
+  quote_email: string;
+  default_discount_pct: string;
+  address_line_1: string;
+  address_line_2: string;
+  default_fine_print: string;
+};
+
+const blankHubSettings: HubSettings = {
+  quote_phone: "",
+  quote_email: "",
+  default_discount_pct: "",
+  address_line_1: "",
+  address_line_2: "",
+  default_fine_print: DP_TERMS.join("\n"),
+};
+
 
 type ClientDocumentMetadata = {
   notes?: string | null;
@@ -1838,6 +1872,49 @@ const blankForm: ClientForm = {
   notes: "",
   tax_exempt: false,
 };
+
+function normalizeMatchText(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizePhone(value: string | null | undefined) {
+  return String(value || "").replace(/\D/g, "").slice(-10);
+}
+
+function parseDmcBadge(rawValue: string): ScannedClient {
+  const raw = rawValue.trim();
+  const parts = raw.split("^").map((value) => value.trim());
+  const emailIndex = parts.findIndex((value) => /\S+@\S+\.\S+/.test(value));
+  const phoneIndex = parts.findIndex((value) => normalizePhone(value).length === 10);
+  const stateIndex = parts.findIndex((value, index) =>
+    /^[A-Za-z]{2}$/.test(value) && /^\d{5}(?:-\d{4})?$/.test(parts[index + 1] || "")
+  );
+
+  if (parts.length < 4) {
+    throw new Error(
+      "This does not look like a DMC badge. Paste or scan the complete ^-separated QR value."
+    );
+  }
+
+  return {
+    buyer_id: parts[0] || "",
+    first_name: parts[1] || "",
+    last_name: parts[2] || "",
+    business_type: parts[3] || "",
+    company_name: parts[4] || "",
+    street_address: parts[5] || "",
+    city: stateIndex > 0 ? parts[stateIndex - 1] : parts[6] || "",
+    state: stateIndex >= 0 ? parts[stateIndex].toUpperCase() : parts[7]?.toUpperCase() || "",
+    zip_code: stateIndex >= 0 ? parts[stateIndex + 1] : parts[8] || "",
+    phone: phoneIndex >= 0 ? parts[phoneIndex] : parts[10] || "",
+    email: emailIndex >= 0 ? parts[emailIndex].toLowerCase() : parts[11]?.toLowerCase() || "",
+    raw,
+  };
+}
+
+function dmcBuyerIdFromNotes(notes: string | null | undefined) {
+  return notes?.match(/\[DMC Buyer ID:\s*([^\]]+)\]/i)?.[1]?.trim() || "";
+}
 
 function getClientName(client: Client) {
   if (client.client_name) return client.client_name;
@@ -2636,6 +2713,17 @@ export default function Home() {
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [clientForm, setClientForm] = useState<ClientForm>(blankForm);
   const [savingClient, setSavingClient] = useState(false);
+  const [scanValue, setScanValue] = useState("");
+  const [scanResult, setScanResult] = useState<ScannedClient | null>(null);
+  const [scanMatch, setScanMatch] = useState<Client | null>(null);
+  const [scanStatus, setScanStatus] = useState("");
+  const [scannerActive, setScannerActive] = useState(false);
+  const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerStreamRef = useRef<MediaStream | null>(null);
+  const scannerTimerRef = useRef<number | null>(null);
+  const [hubSettings, setHubSettings] =
+    useState<HubSettings>(blankHubSettings);
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const [qboConnectionStatus, setQboConnectionStatus] =
     useState<QboConnectionStatus | null>(null);
   const [qboConnectionLoading, setQboConnectionLoading] =
@@ -2743,6 +2831,44 @@ export default function Home() {
 
     let initializingSession = true;
 
+    const finishInitialization = () => {
+      if (!active) return;
+      initializingSession = false;
+      window.clearTimeout(connectionTimeout);
+      setLoading(false);
+    };
+
+    const sessionNeedsRefresh = (currentSession: Session) => {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const expiresAt = currentSession.expires_at ?? 0;
+
+      // Refresh expired/nearly-expired tokens. Also refresh tokens issued by a
+      // clock that is meaningfully ahead of the browser; Supabase otherwise
+      // rejects them as "JWT issued at future".
+      let issuedAt = 0;
+      try {
+        const payload = JSON.parse(
+          window.atob(
+            currentSession.access_token
+              .split(".")[1]
+              .replace(/-/g, "+")
+              .replace(/_/g, "/")
+              .padEnd(
+                Math.ceil(
+                  currentSession.access_token.split(".")[1].length / 4
+                ) * 4,
+                "="
+              )
+          )
+        ) as { iat?: number };
+        issuedAt = Number(payload.iat || 0);
+      } catch {
+        // A malformed token will be rejected by Supabase on the next request.
+      }
+
+      return expiresAt <= nowSeconds + 60 || issuedAt > nowSeconds + 30;
+    };
+
     supabase.auth
       .getSession()
       .then(async ({ data, error }) => {
@@ -2759,13 +2885,32 @@ export default function Home() {
           return;
         }
 
-        const { data: refreshed, error: refreshError } =
-          await supabase.auth.refreshSession(data.session);
+        if (!sessionNeedsRefresh(data.session)) {
+          setSession(data.session);
+          return;
+        }
+
+        const refreshResult = await Promise.race([
+          supabase.auth.refreshSession(data.session),
+          new Promise<null>((resolve) =>
+            window.setTimeout(() => resolve(null), 7000)
+          ),
+        ]);
 
         if (!active) return;
 
+        if (!refreshResult) {
+          setMessage(
+            "The saved session could not be refreshed. Please sign in again."
+          );
+          setSession(null);
+          return;
+        }
+
+        const { data: refreshed, error: refreshError } = refreshResult;
+
         if (refreshError || !refreshed.session) {
-          await supabase.auth.signOut({ scope: "local" });
+          void supabase.auth.signOut({ scope: "local" });
           setMessage(
             "Your saved session expired. Please sign in again."
           );
@@ -2785,10 +2930,7 @@ export default function Home() {
         setSession(null);
       })
       .finally(() => {
-        if (!active) return;
-        initializingSession = false;
-        window.clearTimeout(connectionTimeout);
-        setLoading(false);
+        finishInitialization();
       });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
@@ -3818,6 +3960,45 @@ export default function Home() {
     loadPriceLists,
     loadAcknowledgementLibrary,
   ]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    try {
+      const personal = JSON.parse(
+        window.localStorage.getItem(
+          `dp-hub-quote-profile:${session.user.id}`
+        ) || "{}"
+      ) as Partial<HubSettings>;
+      const company = JSON.parse(
+        window.localStorage.getItem("dp-hub-company-defaults") || "{}"
+      ) as Partial<HubSettings>;
+
+      setHubSettings({
+        ...blankHubSettings,
+        quote_phone: personal.quote_phone || profile?.phone || "",
+        quote_email: personal.quote_email || profile?.email || session.user.email || "",
+        default_discount_pct: personal.default_discount_pct || "",
+        address_line_1: company.address_line_1 || "",
+        address_line_2: company.address_line_2 || "",
+        default_fine_print:
+          company.default_fine_print || blankHubSettings.default_fine_print,
+      });
+    } catch {
+      setHubSettings({
+        ...blankHubSettings,
+        quote_phone: profile?.phone || "",
+        quote_email: profile?.email || session.user.email || "",
+      });
+    }
+  }, [profile, session?.user?.email, session?.user?.id]);
+
+  useEffect(() => {
+    if (view !== "scan") stopBadgeScanner();
+    return () => {
+      if (view === "scan") stopBadgeScanner();
+    };
+  }, [view]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4917,6 +5098,11 @@ export default function Home() {
           result.payload?.error ||
           "Team management could not be loaded.";
 
+        // Keep the screen useful when the admin endpoint is unavailable.
+        // The regular profile query is read-only, but it is enough to show
+        // the existing team instead of incorrectly claiming there are none.
+        setAdminTeam(team);
+
         if (!quiet) {
           setMessage(errorMessage);
         }
@@ -4939,6 +5125,7 @@ export default function Home() {
         );
       }
     } catch (error) {
+      setAdminTeam(team);
       if (!quiet) {
         setMessage(
           error instanceof Error
@@ -6450,9 +6637,10 @@ export default function Home() {
           next = {
             ...next,
             manufacturer_id: String(value || ""),
-            discount_pct: numberOrZero(
-              manufacturer?.default_discount_pct
-            ),
+            discount_pct:
+              manufacturer?.default_discount_pct == null
+                ? numberOrZero(hubSettings.default_discount_pct)
+                : numberOrZero(manufacturer.default_discount_pct),
             purchasing_factor_snapshot:
               manufacturer?.purchasing_factor == null
                 ? null
@@ -6523,9 +6711,10 @@ export default function Home() {
             description: description || existing.description,
             grade: priceListItem.grade || "",
             msrp_at_grade: numberOrZero(priceListItem.msrp),
-            discount_pct: numberOrZero(
-              manufacturer?.default_discount_pct
-            ),
+            discount_pct:
+              manufacturer?.default_discount_pct == null
+                ? numberOrZero(hubSettings.default_discount_pct)
+                : numberOrZero(manufacturer.default_discount_pct),
             purchasing_factor_snapshot:
               manufacturer?.purchasing_factor == null
                 ? null
@@ -6830,9 +7019,16 @@ export default function Home() {
       fillRect(0, FOOTER_TOP, PAGE_W, PAGE_H - FOOTER_TOP, NAVY);
 
       const salesName = salesperson?.display_name || "Designer’s Patio";
+      const useMyQuoteProfile = salesperson?.id === profile?.id;
       const salesEmail =
+        (useMyQuoteProfile && hubSettings.quote_email) ||
         salesperson?.email || "info@designerspatio.com";
-      const salesPhone = salesperson?.phone || "214.217.9997";
+      const salesPhone =
+        (useMyQuoteProfile && hubSettings.quote_phone) ||
+        salesperson?.phone || "214.217.9997";
+      const showroomLine1 =
+        hubSettings.address_line_1 || "2000 N Stemmons Fwy Ste 1D110";
+      const showroomLine2 = hubSettings.address_line_2 || "Dallas, TX 75207";
 
       textAt(40, FOOTER_TOP + 10, "SALESPERSON", 6.8, true, [1, 1, 1]);
       textAt(40, FOOTER_TOP + 21, salesName, 7.2, true, [1, 1, 1]);
@@ -6844,12 +7040,12 @@ export default function Home() {
       textAt(
         242,
         FOOTER_TOP + 22,
-        "2000 N Stemmons Fwy Ste 1D110",
+        showroomLine1,
         6.6,
         false,
         [1, 1, 1]
       );
-      textAt(242, FOOTER_TOP + 33, "Dallas, TX 75207", 6.6, false, [1, 1, 1]);
+      textAt(242, FOOTER_TOP + 33, showroomLine2, 6.6, false, [1, 1, 1]);
 
       lineAt(430, FOOTER_TOP + 7, 430, 782, 0.5, [0.6, 0.72, 0.8]);
       textAt(450, FOOTER_TOP + 10, "WEBSITE", 6.8, true, [1, 1, 1]);
@@ -7138,7 +7334,12 @@ export default function Home() {
 
     textAt(termsX, summaryTop, "TERMS & CONDITIONS", 8.8, true, NAVY);
     let termsTop = summaryTop + 17;
-    DP_TERMS.forEach((term, index) => {
+    const configuredQuoteTerms = hubSettings.default_fine_print
+      .split(/\n+/)
+      .map((term) => term.trim())
+      .filter(Boolean);
+
+    (configuredQuoteTerms.length ? configuredQuoteTerms : DP_TERMS).forEach((term, index) => {
       const wrapped = wrapPdfWidth(`${index + 1}. ${term}`, termsW, 6.3);
       wrapped.forEach((entry, lineIndex) => {
         textAt(termsX, termsTop, entry, 6.3, lineIndex === 0, DARK);
@@ -7438,9 +7639,16 @@ export default function Home() {
       fillRect(0, FOOTER_TOP, PAGE_W, PAGE_H - FOOTER_TOP, NAVY);
 
       const salesName = salesperson?.display_name || "Designer’s Patio";
+      const useMyQuoteProfile = salesperson?.id === profile?.id;
       const salesEmail =
+        (useMyQuoteProfile && hubSettings.quote_email) ||
         salesperson?.email || "info@designerspatio.com";
-      const salesPhone = salesperson?.phone || "214.217.9997";
+      const salesPhone =
+        (useMyQuoteProfile && hubSettings.quote_phone) ||
+        salesperson?.phone || "214.217.9997";
+      const showroomLine1 =
+        hubSettings.address_line_1 || "2000 N Stemmons Fwy Ste 1D110";
+      const showroomLine2 = hubSettings.address_line_2 || "Dallas, TX 75207";
 
       textAt(40, FOOTER_TOP + 10, "SALESPERSON", 6.8, true, [1, 1, 1]);
       textAt(40, FOOTER_TOP + 21, salesName, 7.2, true, [1, 1, 1]);
@@ -7452,12 +7660,12 @@ export default function Home() {
       textAt(
         242,
         FOOTER_TOP + 22,
-        "2000 N Stemmons Fwy Ste 1D110",
+        showroomLine1,
         6.6,
         false,
         [1, 1, 1]
       );
-      textAt(242, FOOTER_TOP + 33, "Dallas, TX 75207", 6.6, false, [1, 1, 1]);
+      textAt(242, FOOTER_TOP + 33, showroomLine2, 6.6, false, [1, 1, 1]);
 
       lineAt(430, FOOTER_TOP + 7, 430, 782, 0.5, [0.6, 0.72, 0.8]);
       textAt(450, FOOTER_TOP + 10, "WEBSITE", 6.8, true, [1, 1, 1]);
@@ -7705,7 +7913,12 @@ export default function Home() {
 
     textAt(termsX, summaryTop, "TERMS & CONDITIONS", 8.8, true, NAVY);
     let termsTop = summaryTop + 17;
-    DP_SALES_TERMS.forEach((term, index) => {
+    const configuredSalesTerms = hubSettings.default_fine_print
+      .split(/\n+/)
+      .map((term) => term.trim())
+      .filter(Boolean);
+
+    (configuredSalesTerms.length ? configuredSalesTerms : DP_SALES_TERMS).forEach((term, index) => {
       const wrapped = wrapPdfWidth(`${index + 1}. ${term}`, termsW, 6.3);
       wrapped.forEach((entry, lineIndex) => {
         textAt(termsX, termsTop, entry, 6.3, lineIndex === 0, DARK);
@@ -8968,9 +9181,9 @@ export default function Home() {
 
         const nextDiscount =
           shouldUseInventoryMsrp
-            ? numberOrZero(
-                manufacturer?.default_discount_pct
-              )
+            ? manufacturer?.default_discount_pct == null
+              ? numberOrZero(hubSettings.default_discount_pct)
+              : numberOrZero(manufacturer.default_discount_pct)
             : numberOrZero(
                 existing.discount_pct
               );
@@ -9120,9 +9333,10 @@ export default function Home() {
           next = {
             ...next,
             manufacturer_id: String(value || ""),
-            discount_pct: numberOrZero(
-              manufacturer?.default_discount_pct
-            ),
+            discount_pct:
+              manufacturer?.default_discount_pct == null
+                ? numberOrZero(hubSettings.default_discount_pct)
+                : numberOrZero(manufacturer.default_discount_pct),
             purchasing_factor_snapshot:
               manufacturer?.purchasing_factor == null
                 ? null
@@ -12216,9 +12430,10 @@ export default function Home() {
     manufacturer: Manufacturer | null,
     msrp: number
   ) {
-    const discount = numberOrZero(
-      manufacturer?.default_discount_pct
-    );
+    const discount =
+      manufacturer?.default_discount_pct == null
+        ? numberOrZero(hubSettings.default_discount_pct)
+        : numberOrZero(manufacturer.default_discount_pct);
 
     return (
       numberOrZero(msrp) *
@@ -17668,6 +17883,191 @@ export default function Home() {
     setDailyCashNotes("");
   }
 
+  function findScannedClient(scanned: ScannedClient) {
+    const buyerId = normalizeMatchText(scanned.buyer_id);
+    const email = normalizeMatchText(scanned.email);
+    const phone = normalizePhone(scanned.phone);
+    const lastName = normalizeMatchText(scanned.last_name);
+    const company = normalizeMatchText(scanned.company_name);
+
+    return (
+      clients.find(
+        (client) =>
+          buyerId &&
+          normalizeMatchText(dmcBuyerIdFromNotes(client.notes)) === buyerId
+      ) ||
+      clients.find(
+        (client) => email && normalizeMatchText(client.email) === email
+      ) ||
+      clients.find((client) => {
+        if (!phone || normalizePhone(client.phone) !== phone) return false;
+        return (
+          (lastName && normalizeMatchText(client.last_name) === lastName) ||
+          (company &&
+            (normalizeMatchText(client.company_name) === company ||
+              normalizeMatchText(client.client_name) === company))
+        );
+      }) ||
+      null
+    );
+  }
+
+  function processBadgeValue(value: string) {
+    try {
+      const parsed = parseDmcBadge(value);
+      const matched = findScannedClient(parsed);
+      setScanValue(value);
+      setScanResult(parsed);
+      setScanMatch(matched);
+      setScanStatus(
+        matched
+          ? `Existing client found: ${getClientName(matched)}`
+          : "New badge. Review the details and create the client."
+      );
+      stopBadgeScanner();
+    } catch (error) {
+      setScanResult(null);
+      setScanMatch(null);
+      setScanStatus(
+        error instanceof Error ? error.message : "Could not read this badge."
+      );
+    }
+  }
+
+  function stopBadgeScanner() {
+    if (scannerTimerRef.current != null) {
+      window.clearTimeout(scannerTimerRef.current);
+      scannerTimerRef.current = null;
+    }
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+    scannerStreamRef.current = null;
+    if (scannerVideoRef.current) scannerVideoRef.current.srcObject = null;
+    setScannerActive(false);
+  }
+
+  async function startBadgeScanner() {
+    setScanStatus("");
+    const BarcodeDetectorClass = (
+      window as unknown as {
+        BarcodeDetector?: new (options: { formats: string[] }) => {
+          detect(source: CanvasImageSource): Promise<Array<{ rawValue: string }>>;
+        };
+      }
+    ).BarcodeDetector;
+
+    if (!BarcodeDetectorClass || !navigator.mediaDevices?.getUserMedia) {
+      setScanStatus(
+        "Live camera scanning is not supported in this browser. Use the scanner keyboard or paste the badge value below."
+      );
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      scannerStreamRef.current = stream;
+      setScannerActive(true);
+
+      const video = scannerVideoRef.current;
+      if (!video) throw new Error("Scanner video is unavailable.");
+      video.srcObject = stream;
+      await video.play();
+
+      const detector = new BarcodeDetectorClass({
+        formats: ["qr_code"],
+      });
+
+      const detect = async () => {
+        if (!scannerStreamRef.current || !scannerVideoRef.current) return;
+        try {
+          const codes = await detector.detect(scannerVideoRef.current);
+          if (codes[0]?.rawValue) {
+            processBadgeValue(codes[0].rawValue);
+            return;
+          }
+        } catch {
+          // Keep scanning; a frame without a readable code is normal.
+        }
+        scannerTimerRef.current = window.setTimeout(detect, 250);
+      };
+
+      await detect();
+    } catch (error) {
+      stopBadgeScanner();
+      setScanStatus(
+        error instanceof Error
+          ? `Camera could not start: ${error.message}`
+          : "Camera could not start."
+      );
+    }
+  }
+
+  function createClientFromScan() {
+    if (!scanResult) return;
+    const personalName = [scanResult.first_name, scanResult.last_name]
+      .filter(Boolean)
+      .join(" ");
+    const marker = scanResult.buyer_id
+      ? `[DMC Buyer ID: ${scanResult.buyer_id}]`
+      : "";
+    const context = [
+      marker,
+      scanResult.business_type
+        ? `Business type: ${scanResult.business_type}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setSelectedClient(null);
+    setClientDocuments([]);
+    setClientForm({
+      ...blankForm,
+      client_name: scanResult.company_name || personalName || "New DMC Client",
+      phone: scanResult.phone,
+      email: scanResult.email,
+      street_address: scanResult.street_address,
+      city: scanResult.city,
+      state: scanResult.state,
+      zip_code: scanResult.zip_code,
+      assigned_user_id: profile?.id || "",
+      notes: context,
+    });
+    setClientMode("new");
+    setClientModalOpen(true);
+  }
+
+  function saveHubSettings() {
+    const discount = Number(hubSettings.default_discount_pct || 0);
+    if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+      setMessage("Default discount must be between 0 and 100%.");
+      return;
+    }
+
+    if (!session?.user?.id) return;
+    window.localStorage.setItem(
+      `dp-hub-quote-profile:${session.user.id}`,
+      JSON.stringify({
+        quote_phone: hubSettings.quote_phone.trim(),
+        quote_email: hubSettings.quote_email.trim(),
+        default_discount_pct: hubSettings.default_discount_pct.trim(),
+      })
+    );
+    window.localStorage.setItem(
+      "dp-hub-company-defaults",
+      JSON.stringify({
+        address_line_1: hubSettings.address_line_1.trim(),
+        address_line_2: hubSettings.address_line_2.trim(),
+        default_fine_print: hubSettings.default_fine_print.trim(),
+      })
+    );
+    setSettingsSaved(true);
+    setMessage("Settings saved on this device.");
+    window.setTimeout(() => setSettingsSaved(false), 2500);
+  }
+
   function openFutureSection(label: string) {
     setMessage(`${label} is coming next.`);
   }
@@ -17808,8 +18208,11 @@ export default function Home() {
               </button>
 
               <button
-                className="nav-button future"
-                onClick={() => openFutureSection("Client Scanner")}
+                className={`nav-button ${view === "scan" ? "active" : ""}`}
+                onClick={() => {
+                  setView("scan");
+                  setMessage("");
+                }}
               >
                 <span>▣</span>
                 Scan
@@ -17992,7 +18395,7 @@ export default function Home() {
                 onClick={async () => {
                   setView("team");
                   setMessage("");
-                  await loadAdminTeam(true);
+                  await loadAdminTeam(false);
                 }}
               >
                 <span>⚙</span>
@@ -18000,12 +18403,11 @@ export default function Home() {
               </button>
 
               <button
-                className="nav-button future"
-                onClick={() =>
-                  openFutureSection(
-                    "Settings"
-                  )
-                }
+                className={`nav-button ${view === "settings" ? "active" : ""}`}
+                onClick={() => {
+                  setView("settings");
+                  setMessage("");
+                }}
               >
                 <span>⚙</span>
                 Settings
@@ -18022,6 +18424,8 @@ export default function Home() {
                   ? "Dashboard"
                   : view === "clients"
                   ? "Clients"
+                  : view === "scan"
+                  ? "Scan"
                   : view === "manufacturers"
                   ? "Manufacturers"
                   : view === "quotes"
@@ -18046,6 +18450,8 @@ export default function Home() {
                   ? "Acknowledgements"
                   : view === "team"
                   ? "Team"
+                  : view === "settings"
+                  ? "Settings"
                   : "Reports"}
               </div>
               <div className="topbar-subtitle">
@@ -20642,6 +21048,136 @@ export default function Home() {
             </section>
           )}
 
+          {view === "scan" && (
+            <section>
+              <div className="page-heading">
+                <div>
+                  <div className="section-eyebrow">DMC BADGE INTAKE</div>
+                  <h1>Scan Client Badge</h1>
+                  <p>
+                    Scan a DMC QR badge, recognize returning clients, and assign
+                    new contacts before starting a quote.
+                  </p>
+                </div>
+              </div>
+
+              <div className="scanner-grid">
+                <section className="scanner-card">
+                  <div className="panel-eyebrow">CAMERA</div>
+                  <h2>{scannerActive ? "Point at the badge QR" : "Ready to scan"}</h2>
+                  <div className={`scanner-video-shell ${scannerActive ? "active" : ""}`}>
+                    <video ref={scannerVideoRef} muted playsInline />
+                    {!scannerActive && <div className="scanner-placeholder">▣</div>}
+                  </div>
+                  <div className="scanner-actions">
+                    <button
+                      className="new-client-button"
+                      onClick={scannerActive ? stopBadgeScanner : startBadgeScanner}
+                    >
+                      {scannerActive ? "Stop Camera" : "Start Camera"}
+                    </button>
+                  </div>
+                  <p className="scanner-help">
+                    You can also use a handheld scanner. Click the field below,
+                    scan, and press Enter.
+                  </p>
+                </section>
+
+                <section className="scanner-card">
+                  <div className="panel-eyebrow">SCANNER / MANUAL FALLBACK</div>
+                  <h2>Badge value</h2>
+                  <textarea
+                    className="scanner-input"
+                    value={scanValue}
+                    onChange={(event) => setScanValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && scanValue.trim()) {
+                        event.preventDefault();
+                        processBadgeValue(scanValue);
+                      }
+                    }}
+                    placeholder="Paste the ^-separated DMC badge value here..."
+                  />
+                  <div className="scanner-actions">
+                    <button
+                      className="new-client-button"
+                      disabled={!scanValue.trim()}
+                      onClick={() => processBadgeValue(scanValue)}
+                    >
+                      Read Badge
+                    </button>
+                    <button
+                      className="modal-secondary"
+                      onClick={() => {
+                        setScanValue("");
+                        setScanResult(null);
+                        setScanMatch(null);
+                        setScanStatus("");
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {scanStatus && (
+                    <div className={`scan-status ${scanMatch ? "matched" : ""}`}>
+                      {scanStatus}
+                    </div>
+                  )}
+                </section>
+              </div>
+
+              {scanResult && (
+                <section className="scan-result-card">
+                  <div className="scan-result-heading">
+                    <div>
+                      <div className="panel-eyebrow">
+                        {scanMatch ? "RETURNING CLIENT" : "NEW CLIENT"}
+                      </div>
+                      <h2>
+                        {scanResult.company_name ||
+                          [scanResult.first_name, scanResult.last_name].filter(Boolean).join(" ") ||
+                          "DMC Client"}
+                      </h2>
+                    </div>
+                    {scanMatch ? (
+                      <button className="new-client-button" onClick={() => openClient(scanMatch)}>
+                        Open Existing Client
+                      </button>
+                    ) : (
+                      <button className="new-client-button" onClick={createClientFromScan}>
+                        Review & Create Client
+                      </button>
+                    )}
+                  </div>
+                  <div className="scan-detail-grid">
+                    <DetailField label="DMC Buyer ID" value={scanResult.buyer_id || "Not supplied"} />
+                    <DetailField
+                      label="Contact"
+                      value={[scanResult.first_name, scanResult.last_name].filter(Boolean).join(" ") || "Not supplied"}
+                    />
+                    <DetailField label="Business Type" value={scanResult.business_type || "Not supplied"} />
+                    <DetailField label="Email" value={scanResult.email || "Not supplied"} />
+                    <DetailField label="Phone" value={scanResult.phone || "Not supplied"} />
+                    <DetailField
+                      label="Location"
+                      value={
+                        [scanResult.city, scanResult.state, scanResult.zip_code]
+                          .filter(Boolean)
+                          .join(", ") || "Not supplied"
+                      }
+                    />
+                  </div>
+                  {!scanMatch && (
+                    <div className="scan-assignment-note">
+                      New clients default to <strong>{profile?.display_name || "the signed-in salesperson"}</strong>.
+                      You can change the salesperson in the review form before saving.
+                    </div>
+                  )}
+                </section>
+              )}
+            </section>
+          )}
+
           {view === "clients" && (
             <section>
               <div className="page-heading">
@@ -20944,6 +21480,135 @@ export default function Home() {
                   </div>
                 )}
               </section>
+            </section>
+          )}
+
+          {view === "settings" && (
+            <section>
+              <div className="page-heading">
+                <div>
+                  <div className="section-eyebrow">HUB CONFIGURATION</div>
+                  <h1>Settings</h1>
+                  <p>
+                    Control your quote identity and the company defaults used
+                    when preparing customer documents.
+                  </p>
+                </div>
+                <button className="new-client-button" onClick={saveHubSettings}>
+                  {settingsSaved ? "Saved ✓" : "Save Settings"}
+                </button>
+              </div>
+
+              <div className="settings-grid">
+                <section className="settings-card">
+                  <div className="panel-eyebrow">PERSONAL</div>
+                  <h2>My Quote Profile</h2>
+                  <p>
+                    These details identify you on quotes and customer-facing PDFs.
+                  </p>
+                  <div className="form-grid settings-form-grid">
+                    <label className="form-field wide">
+                      <span>Salesperson Name</span>
+                      <input value={profile?.display_name || ""} readOnly />
+                      <small>Managed from your Team Account.</small>
+                    </label>
+                    <label className="form-field">
+                      <span>Phone</span>
+                      <input
+                        value={hubSettings.quote_phone}
+                        onChange={(event) =>
+                          setHubSettings((current) => ({
+                            ...current,
+                            quote_phone: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Email</span>
+                      <input
+                        type="email"
+                        value={hubSettings.quote_email}
+                        onChange={(event) =>
+                          setHubSettings((current) => ({
+                            ...current,
+                            quote_email: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Default Discount %</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={hubSettings.default_discount_pct}
+                        onChange={(event) =>
+                          setHubSettings((current) => ({
+                            ...current,
+                            default_discount_pct: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </section>
+
+                <section className="settings-card">
+                  <div className="panel-eyebrow">COMPANY</div>
+                  <h2>Company Defaults</h2>
+                  <p>
+                    Standard address and policy language for customer documents.
+                  </p>
+                  <div className="form-grid settings-form-grid">
+                    <label className="form-field wide">
+                      <span>Address Line 1</span>
+                      <input
+                        value={hubSettings.address_line_1}
+                        onChange={(event) =>
+                          setHubSettings((current) => ({
+                            ...current,
+                            address_line_1: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="form-field wide">
+                      <span>Address Line 2</span>
+                      <input
+                        value={hubSettings.address_line_2}
+                        onChange={(event) =>
+                          setHubSettings((current) => ({
+                            ...current,
+                            address_line_2: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="form-field wide">
+                      <span>Default Fine Print</span>
+                      <textarea
+                        rows={7}
+                        value={hubSettings.default_fine_print}
+                        onChange={(event) =>
+                          setHubSettings((current) => ({
+                            ...current,
+                            default_fine_print: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </section>
+              </div>
+
+              <div className="settings-storage-note">
+                <strong>Beta note:</strong> These settings are saved in this browser.
+                Company-wide database synchronization can be added once the shared
+                settings table is installed.
+              </div>
             </section>
           )}
 
@@ -38901,7 +39566,86 @@ const appCss = `
     line-height: 1.45;
   }
 
+  .scanner-grid, .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 18px;
+  }
+
+  .scanner-card, .scan-result-card, .settings-card {
+    border: 1px solid #dbe5ea;
+    border-radius: 20px;
+    padding: 22px;
+    background: white;
+    box-shadow: 0 10px 30px rgba(24,58,82,.06);
+  }
+
+  .scanner-card h2, .scan-result-card h2, .settings-card h2 {
+    margin: 5px 0 8px;
+    color: #173a59;
+  }
+
+  .scanner-video-shell {
+    min-height: 290px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 2px dashed #bfd0d9;
+    border-radius: 17px;
+    background: linear-gradient(145deg,#edf4f8,#f9fbfc);
+  }
+
+  .scanner-video-shell.active { border-style: solid; border-color: #285d7d; }
+  .scanner-video-shell video { width: 100%; max-height: 360px; object-fit: cover; }
+  .scanner-placeholder { color: #285d7d; font-size: 64px; opacity: .45; }
+  .scanner-actions { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
+  .scanner-help { margin: 14px 0 0; color: #718692; font-size: 12px; line-height: 1.5; }
+
+  .scanner-input {
+    width: 100%;
+    min-height: 190px;
+    resize: vertical;
+    border: 1px solid #cedce4;
+    border-radius: 14px;
+    padding: 14px;
+    color: #27495d;
+    background: #f9fbfc;
+    font: inherit;
+    line-height: 1.5;
+  }
+
+  .scan-status {
+    margin-top: 14px;
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: #fff4e5;
+    color: #8a5c15;
+    font-size: 12px;
+    font-weight: 750;
+  }
+
+  .scan-status.matched { background: #e9f7ef; color: #24623e; }
+  .scan-result-card { margin-top: 18px; }
+  .scan-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .scan-detail-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 18px; }
+  .scan-assignment-note, .settings-storage-note {
+    margin-top: 16px;
+    border: 1px solid #d7e4eb;
+    border-radius: 13px;
+    padding: 12px 14px;
+    background: #f4f8fa;
+    color: #526f7f;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .settings-card > p { color: #718692; font-size: 12px; line-height: 1.55; }
+  .settings-form-grid { margin-top: 18px; }
+  .form-field small { color: #8496a0; font-size: 10px; }
+
   @media (max-width: 900px) {
+    .scanner-grid, .settings-grid { grid-template-columns: 1fr; }
+    .scan-detail-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
     .ai-finder-ai-summary {
       align-items: flex-start;
       flex-direction: column;
