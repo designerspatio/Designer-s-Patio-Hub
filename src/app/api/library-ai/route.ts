@@ -27,14 +27,19 @@ function publicSupabase() {
   );
 }
 
-function adminSupabase() {
+function authorizedSupabase(accessToken: string) {
   return createClient(
     env("NEXT_PUBLIC_SUPABASE_URL"),
-    env("SUPABASE_SERVICE_ROLE_KEY"),
+    env("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
     {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
+      },
+      global: {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       },
     }
   );
@@ -59,7 +64,7 @@ async function authenticatedHubUser(request: Request) {
   } = await supabase.auth.getUser(token);
 
   if (error || !user) return null;
-  return user;
+  return { user, accessToken: token };
 }
 
 function outputText(payload: any) {
@@ -280,12 +285,11 @@ function finderTerms(value: string) {
 
 async function signedLibraryUrl(
   bucket: "catalogs" | "price-lists",
-  filePath: string
+  filePath: string,
+  supabase: ReturnType<typeof authorizedSupabase>
 ) {
-  const admin = adminSupabase();
-
   const { data, error } =
-    await admin.storage
+    await supabase.storage
       .from(bucket)
       .createSignedUrl(
         filePath,
@@ -308,10 +312,9 @@ async function signedLibraryUrl(
 async function insertInChunks(
   table: string,
   rows: Record<string, unknown>[],
+  supabase: ReturnType<typeof authorizedSupabase>,
   chunkSize = 150
 ) {
-  const admin = adminSupabase();
-
   for (
     let index = 0;
     index < rows.length;
@@ -323,7 +326,7 @@ async function insertInChunks(
     );
 
     const { error } =
-      await admin
+      await supabase
         .from(table)
         .insert(chunk);
 
@@ -550,9 +553,10 @@ const finderSchema = {
 
 async function ingestCatalog(
   catalogId: string,
-  userId: string
+  userId: string,
+  accessToken: string
 ) {
-  const admin = adminSupabase();
+  const admin = authorizedSupabase(accessToken);
 
   const {
     data: catalog,
@@ -601,7 +605,8 @@ async function ingestCatalog(
   const signedUrl =
     await signedLibraryUrl(
       "catalogs",
-      catalog.file_path
+      catalog.file_path,
+      admin
     );
 
   const prompt = [
@@ -776,7 +781,8 @@ async function ingestCatalog(
 
   await insertInChunks(
     "catalog_items",
-    rows
+    rows,
+    admin
   );
 
   await admin
@@ -815,9 +821,10 @@ async function ingestCatalog(
 
 async function ingestPriceList(
   priceListId: string,
-  userId: string
+  userId: string,
+  accessToken: string
 ) {
-  const admin = adminSupabase();
+  const admin = authorizedSupabase(accessToken);
 
   const {
     data: priceList,
@@ -866,7 +873,8 @@ async function ingestPriceList(
   const signedUrl =
     await signedLibraryUrl(
       "price-lists",
-      priceList.file_path
+      priceList.file_path,
+      admin
     );
 
   const prompt = [
@@ -1008,7 +1016,8 @@ async function ingestPriceList(
 
   await insertInChunks(
     "price_list_items",
-    rows
+    rows,
+    admin
   );
 
   // Deliberately do NOT alter approved_for_pricing.
@@ -1051,9 +1060,10 @@ async function ingestPriceList(
 }
 
 async function runFinder(
-  body: any
+  body: any,
+  accessToken: string
 ) {
-  const admin = adminSupabase();
+  const admin = authorizedSupabase(accessToken);
 
   const prompt =
     String(
@@ -1693,12 +1703,12 @@ export async function POST(
   request: Request
 ) {
   try {
-    const user =
+    const auth =
       await authenticatedHubUser(
         request
       );
 
-    if (!user) {
+    if (!auth) {
       return NextResponse.json(
         {
           error:
@@ -1745,7 +1755,8 @@ export async function POST(
       return NextResponse.json(
         await ingestCatalog(
           catalogId,
-          user.id
+          auth.user.id,
+          auth.accessToken
         )
       );
     }
@@ -1775,14 +1786,18 @@ export async function POST(
       return NextResponse.json(
         await ingestPriceList(
           priceListId,
-          user.id
+          auth.user.id,
+          auth.accessToken
         )
       );
     }
 
     if (action === "finder") {
       return NextResponse.json(
-        await runFinder(body)
+        await runFinder(
+          body,
+          auth.accessToken
+        )
       );
     }
 
