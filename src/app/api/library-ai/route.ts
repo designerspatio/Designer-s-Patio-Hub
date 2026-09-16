@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const LIBRARY_AI_ROUTE_VERSION = "2026-09-16-authenticated-user-v2";
+
 function env(name: string) {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -1697,6 +1699,21 @@ async function runFinder(
       ),
     results,
   };
+}
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      status: "ok",
+      route_version: LIBRARY_AI_ROUTE_VERSION,
+      service_role_required: false,
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    }
+  );
 }
 
 export async function POST(
