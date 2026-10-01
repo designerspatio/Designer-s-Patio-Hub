@@ -2671,6 +2671,10 @@ export default function Home() {
     useState<PriceListItem[]>([]);
   const [quotePriceListItems, setQuotePriceListItems] =
     useState<PriceListItem[]>([]);
+  const [quotePriceBrowserItemId, setQuotePriceBrowserItemId] =
+    useState<string | null>(null);
+  const [quotePriceBrowserSearch, setQuotePriceBrowserSearch] =
+    useState("");
   const [priceListSearch, setPriceListSearch] =
     useState("");
   const [priceListLoading, setPriceListLoading] =
@@ -24470,6 +24474,45 @@ export default function Home() {
                           priceListItem.manufacturer_id ===
                           item.manufacturer_id
                       );
+                    const manufacturerApprovedPriceLists =
+                      priceLists.filter(
+                        (priceList) =>
+                          priceList.manufacturer_id ===
+                            item.manufacturer_id &&
+                          priceList.active !== false &&
+                          priceList.approved_for_pricing === true
+                      );
+                    const priceBrowserOpen =
+                      quotePriceBrowserItemId === item.local_id;
+                    const priceBrowserTerm = priceBrowserOpen
+                      ? quotePriceBrowserSearch
+                          .trim()
+                          .toLowerCase()
+                      : "";
+                    const visiblePriceListItems =
+                      manufacturerPriceListItems
+                        .filter((priceListItem) => {
+                          if (!priceBrowserTerm) return true;
+                          const source = priceLists.find(
+                            (priceList) =>
+                              priceList.id ===
+                              priceListItem.price_list_id
+                          );
+                          return [
+                            priceListItem.sku,
+                            priceListItem.product_name,
+                            priceListItem.collection,
+                            priceListItem.description,
+                            priceListItem.grade,
+                            source?.title,
+                            source?.version,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")
+                            .toLowerCase()
+                            .includes(priceBrowserTerm);
+                        })
+                        .slice(0, 100);
                     const extended =
                       numberOrZero(item.quantity) *
                       numberOrZero(item.unit_price);
@@ -24539,34 +24582,53 @@ export default function Home() {
                             label="Price List Product"
                             wide
                           >
-                            <input
-                              key={`${item.local_id}-${item.manufacturer_id}`}
-                              list={`quote-price-list-${item.local_id}`}
-                              disabled={!item.manufacturer_id}
-                              placeholder={
-                                !item.manufacturer_id
-                                  ? "Choose a manufacturer first"
-                                  : manufacturerPriceListItems.length === 0
-                                    ? "No approved price list products"
-                                    : "Search by SKU or product name"
-                              }
-                              onChange={(event) => {
-                                const selected =
-                                  manufacturerPriceListItems.find(
-                                    (priceListItem) =>
-                                      quotePriceListLabel(
-                                        priceListItem
-                                      ) === event.target.value
-                                  );
-
-                                if (selected) {
-                                  applyQuotePriceListItem(
-                                    item.local_id,
-                                    selected
-                                  );
+                            <div className="quote-price-picker">
+                              <input
+                                key={`${item.local_id}-${item.manufacturer_id}`}
+                                list={`quote-price-list-${item.local_id}`}
+                                disabled={!item.manufacturer_id}
+                                placeholder={
+                                  !item.manufacturer_id
+                                    ? "Choose a manufacturer first"
+                                    : manufacturerPriceListItems.length === 0
+                                      ? "No approved price list rows"
+                                      : "Search by SKU or product name"
                                 }
-                              }}
-                            />
+                                onChange={(event) => {
+                                  const selected =
+                                    manufacturerPriceListItems.find(
+                                      (priceListItem) =>
+                                        quotePriceListLabel(
+                                          priceListItem
+                                        ) === event.target.value
+                                    );
+
+                                  if (selected) {
+                                    applyQuotePriceListItem(
+                                      item.local_id,
+                                      selected
+                                    );
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="quote-price-browse-button"
+                                disabled={!item.manufacturer_id}
+                                onClick={() => {
+                                  setQuotePriceBrowserItemId(
+                                    priceBrowserOpen
+                                      ? null
+                                      : item.local_id
+                                  );
+                                  setQuotePriceBrowserSearch("");
+                                }}
+                              >
+                                {priceBrowserOpen
+                                  ? "Hide Price List"
+                                  : "Browse Price List"}
+                              </button>
+                            </div>
                             <datalist
                               id={`quote-price-list-${item.local_id}`}
                             >
@@ -24582,6 +24644,153 @@ export default function Home() {
                               )}
                             </datalist>
                           </FormField>
+
+                          {priceBrowserOpen && (
+                            <div className="quote-price-browser">
+                              <div className="quote-price-browser-head">
+                                <div>
+                                  <strong>
+                                    {manufacturer?.name || "Manufacturer"} Price List
+                                  </strong>
+                                  <span>
+                                    {manufacturerPriceListItems.length > 0
+                                      ? `${manufacturerPriceListItems.length} approved pricing row${manufacturerPriceListItems.length === 1 ? "" : "s"}`
+                                      : "No structured pricing rows are loaded yet."}
+                                  </span>
+                                </div>
+                                <input
+                                  autoFocus
+                                  value={quotePriceBrowserSearch}
+                                  onChange={(event) =>
+                                    setQuotePriceBrowserSearch(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Search SKU, collection, product, grade..."
+                                />
+                              </div>
+
+                              {manufacturerApprovedPriceLists.some(
+                                (priceList) => Boolean(priceList.file_path)
+                              ) && (
+                                <div className="quote-price-pdf-links">
+                                  <span>Original vendor PDFs:</span>
+                                  {manufacturerApprovedPriceLists
+                                    .filter((priceList) =>
+                                      Boolean(priceList.file_path)
+                                    )
+                                    .map((priceList) => (
+                                      <button
+                                        type="button"
+                                        key={priceList.id}
+                                        onClick={() =>
+                                          viewLibraryPdf(
+                                            "price-lists",
+                                            priceList.file_path
+                                          )
+                                        }
+                                      >
+                                        Open {priceList.title}
+                                        {priceList.version
+                                          ? ` · ${priceList.version}`
+                                          : ""}
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+
+                              {manufacturerPriceListItems.length === 0 ? (
+                                <div className="quote-price-browser-empty">
+                                  <strong>No price-list rows to browse.</strong>
+                                  <span>
+                                    You can still open the original PDF above and
+                                    type the price manually. Structured rows can
+                                    also be added to the Price List library without
+                                    using OpenAI.
+                                  </span>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="quote-price-browser-table-head">
+                                    <span>SKU</span>
+                                    <span>PRODUCT</span>
+                                    <span>GRADE</span>
+                                    <span>MSRP</span>
+                                    <span />
+                                  </div>
+                                  <div className="quote-price-browser-rows">
+                                    {visiblePriceListItems.map(
+                                      (priceListItem) => {
+                                        const source = priceLists.find(
+                                          (priceList) =>
+                                            priceList.id ===
+                                            priceListItem.price_list_id
+                                        );
+                                        return (
+                                          <button
+                                            type="button"
+                                            className="quote-price-browser-row"
+                                            key={priceListItem.id}
+                                            onClick={() => {
+                                              applyQuotePriceListItem(
+                                                item.local_id,
+                                                priceListItem
+                                              );
+                                              setQuotePriceBrowserItemId(null);
+                                              setQuotePriceBrowserSearch("");
+                                            }}
+                                          >
+                                            <strong>
+                                              {priceListItem.sku || "—"}
+                                            </strong>
+                                            <span>
+                                              <b>
+                                                {priceListItem.product_name ||
+                                                  priceListItem.description ||
+                                                  "Price list item"}
+                                              </b>
+                                              <small>
+                                                {[
+                                                  priceListItem.collection,
+                                                  source?.title,
+                                                  source?.version,
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(" · ")}
+                                              </small>
+                                            </span>
+                                            <span>
+                                              {priceListItem.grade || "—"}
+                                            </span>
+                                            <strong>
+                                              {money(
+                                                numberOrZero(
+                                                  priceListItem.msrp
+                                                )
+                                              )}
+                                            </strong>
+                                            <em>Use Price</em>
+                                          </button>
+                                        );
+                                      }
+                                    )}
+                                  </div>
+                                  {visiblePriceListItems.length === 0 && (
+                                    <div className="quote-price-browser-empty">
+                                      No pricing rows match “{quotePriceBrowserSearch}”.
+                                    </div>
+                                  )}
+                                  {manufacturerPriceListItems.length > 100 &&
+                                    !quotePriceBrowserSearch.trim() && (
+                                      <div className="quote-price-browser-note">
+                                        Showing the first 100 rows. Search by SKU,
+                                        product, collection, or grade to narrow it.
+                                      </div>
+                                    )}
+                                </>
+                              )}
+                            </div>
+                          )}
 
                           <FormField label="Qty">
                             <input
@@ -40223,6 +40432,177 @@ const appCss = `
     }
   }
 
+  .quote-price-picker {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .quote-price-browse-button {
+    border: 1px solid #b9cddd;
+    border-radius: 9px;
+    background: #f7fbfe;
+    color: #24597c;
+    min-height: 38px;
+    padding: 0 12px;
+    font-weight: 850;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .quote-price-browse-button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+  }
+
+  .quote-price-browser {
+    grid-column: 1 / -1;
+    border: 1px solid #c9d9e5;
+    border-radius: 13px;
+    background: #fbfdff;
+    padding: 13px;
+    box-shadow: inset 0 1px 0 white;
+  }
+
+  .quote-price-browser-head {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) minmax(230px, .8fr);
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .quote-price-browser-head strong,
+  .quote-price-browser-head span {
+    display: block;
+  }
+
+  .quote-price-browser-head strong {
+    font-size: 13px;
+    color: #173f5b;
+  }
+
+  .quote-price-browser-head span {
+    margin-top: 2px;
+    color: #71808b;
+    font-size: 10px;
+  }
+
+  .quote-price-browser-head input {
+    width: 100%;
+    border: 1px solid #cbd9e3;
+    border-radius: 9px;
+    padding: 9px 10px;
+    background: white;
+  }
+
+  .quote-price-pdf-links {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+    padding: 8px 0 11px;
+    border-top: 1px solid #e6eef3;
+  }
+
+  .quote-price-pdf-links > span {
+    color: #6d7c87;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .quote-price-pdf-links button {
+    border: 1px solid #cadbe7;
+    border-radius: 999px;
+    background: white;
+    color: #285f82;
+    padding: 5px 9px;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .quote-price-browser-table-head,
+  .quote-price-browser-row {
+    display: grid;
+    grid-template-columns: 120px minmax(0,1fr) 85px 95px 78px;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .quote-price-browser-table-head {
+    padding: 7px 9px;
+    color: #6f7f8a;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .05em;
+  }
+
+  .quote-price-browser-rows {
+    max-height: 310px;
+    overflow: auto;
+    border: 1px solid #dce6ed;
+    border-radius: 10px;
+    background: white;
+  }
+
+  .quote-price-browser-row {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid #edf2f5;
+    background: white;
+    padding: 9px;
+    text-align: left;
+    color: #223542;
+    cursor: pointer;
+  }
+
+  .quote-price-browser-row:last-child {
+    border-bottom: 0;
+  }
+
+  .quote-price-browser-row:hover {
+    background: #f1f7fb;
+  }
+
+  .quote-price-browser-row > span b,
+  .quote-price-browser-row > span small {
+    display: block;
+  }
+
+  .quote-price-browser-row > span small {
+    margin-top: 2px;
+    color: #758590;
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .quote-price-browser-row > em {
+    color: #28688f;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 900;
+    text-align: right;
+  }
+
+  .quote-price-browser-empty,
+  .quote-price-browser-note {
+    padding: 14px;
+    color: #687985;
+    font-size: 11px;
+  }
+
+  .quote-price-browser-empty strong,
+  .quote-price-browser-empty span {
+    display: block;
+  }
+
+  .quote-price-browser-empty span {
+    margin-top: 4px;
+  }
+
   @media (max-width: 650px) {
     .po-snapshot-strip,
     .po-total-box {
@@ -40327,6 +40707,23 @@ const appCss = `
     .quote-line-grid,
     .line-financials {
       grid-template-columns: 1fr;
+    }
+
+    .quote-price-picker,
+    .quote-price-browser-head {
+      grid-template-columns: 1fr;
+    }
+
+    .quote-price-browser-table-head {
+      display: none;
+    }
+
+    .quote-price-browser-row {
+      grid-template-columns: 80px minmax(0,1fr) 60px 78px;
+    }
+
+    .quote-price-browser-row > em {
+      display: none;
     }
 
     .quote-header-grid .wide,
