@@ -204,21 +204,19 @@ function makePdf(lines: PdfLine[]) {
     const commands: string[] = [];
 
     commands.push(
-      "0 0 0 rg",
-      "274 708 64 64 re f",
       "BT",
-      "/F1 16 Tf",
-      "241 683 Td",
+      "/F2 18 Tf",
+      "218 724 Td",
       "(DESIGNER'S PATIO) Tj",
       "ET",
       "0 0 0 RG",
       "0.8 w",
-      "150 670 m",
-      "462 670 l",
+      "150 708 m",
+      "462 708 l",
       "S",
       "BT",
       "/F1 8 Tf",
-      "203 655 Td",
+      "203 693 Td",
       "(LUXURIOUS OUTDOOR FURNISHINGS) Tj",
       "ET"
     );
