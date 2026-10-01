@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
+import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
 
 type PdfLine = {
   text: string;
   size?: number;
   bold?: boolean;
   gapBefore?: number;
+};
+
+type PdfImage = {
+  binary: string;
+  width: number;
+  height: number;
 };
 
 function clean(value: string | null | undefined) {
@@ -18,6 +25,60 @@ function clean(value: string | null | undefined) {
     .replace(/[^\x20-\x7E]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function base64ToBinary(value: string) {
+  return atob(value);
+}
+
+async function imageUrlToPdfJpeg(url: string): Promise<PdfImage | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = reject;
+      element.src = objectUrl;
+    });
+
+    const maxDimension = 720;
+    const scale = Math.min(
+      1,
+      maxDimension / Math.max(image.naturalWidth, image.naturalHeight)
+    );
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      URL.revokeObjectURL(objectUrl);
+      return null;
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.94);
+    URL.revokeObjectURL(objectUrl);
+
+    const base64 = dataUrl.split(",")[1];
+    if (!base64) return null;
+
+    return {
+      binary: base64ToBinary(base64),
+      width,
+      height,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function wrap(text: string, maxChars = 88) {
@@ -156,15 +217,15 @@ function escapePdf(value: string) {
   return clean(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function makePdf(lines: PdfLine[]) {
+function makePdf(lines: PdfLine[], logoImage: PdfImage | null) {
   const pages: PdfLine[][] = [];
   let page: PdfLine[] = [];
-  let y = 625;
+  let y = 585;
 
   const pushPage = () => {
     if (page.length) pages.push(page);
     page = [];
-    y = 625;
+    y = 585;
   };
 
   for (const item of lines) {
@@ -192,34 +253,53 @@ function makePdf(lines: PdfLine[]) {
   const objects: string[] = [];
   objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
 
-  const pageObjectNumbers = pages.map((_, i) => 5 + i * 2);
+  const logoObjectId = logoImage ? 5 : null;
+  const firstPageObjectId = logoImage ? 6 : 5;
+  const pageObjectNumbers = pages.map((_, i) => firstPageObjectId + i * 2);
   objects[2] = `<< /Type /Pages /Count ${pages.length} /Kids [${pageObjectNumbers
     .map((n) => `${n} 0 R`)
     .join(" ")}] >>`;
   objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
   objects[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
 
+  if (logoImage && logoObjectId) {
+    objects[logoObjectId] =
+      `<< /Type /XObject /Subtype /Image /Width ${logoImage.width} /Height ${logoImage.height} ` +
+      `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoImage.binary.length} >>\n` +
+      `stream\n${logoImage.binary}\nendstream`;
+  }
+
   pages.forEach((pageLines, pageIndex) => {
-    let cursorY = 625;
+    let cursorY = 585;
     const commands: string[] = [];
 
-    commands.push(
-      "BT",
-      "/F2 18 Tf",
-      "218 724 Td",
-      "(DESIGNER'S PATIO) Tj",
-      "ET",
-      "0 0 0 RG",
-      "0.8 w",
-      "150 708 m",
-      "462 708 l",
-      "S",
-      "BT",
-      "/F1 8 Tf",
-      "203 693 Td",
-      "(LUXURIOUS OUTDOOR FURNISHINGS) Tj",
-      "ET"
-    );
+    if (logoImage) {
+      const boxW = 220;
+      const boxH = 145;
+      const boxX = (612 - boxW) / 2;
+      const boxTop = 16;
+      const scale = Math.min(boxW / logoImage.width, boxH / logoImage.height);
+      const width = logoImage.width * scale;
+      const height = logoImage.height * scale;
+      const drawX = boxX + (boxW - width) / 2;
+      const drawY = 792 - boxTop - boxH + (boxH - height) / 2;
+      commands.push(
+        `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${drawX.toFixed(2)} ${drawY.toFixed(2)} cm /ImLogo Do Q`
+      );
+    } else {
+      commands.push(
+        "BT",
+        "/F2 18 Tf",
+        "218 724 Td",
+        "(DESIGNER'S PATIO) Tj",
+        "ET",
+        "BT",
+        "/F1 8 Tf",
+        "203 702 Td",
+        "(LUXURIOUS OUTDOOR FURNISHINGS) Tj",
+        "ET"
+      );
+    }
 
     if (pageIndex > 0) {
       commands.push(
@@ -257,8 +337,12 @@ function makePdf(lines: PdfLine[]) {
     const pageObj = pageObjectNumbers[pageIndex];
     const contentObj = pageObj + 1;
 
+    const xObjects =
+      logoImage && logoObjectId
+        ? ` /XObject << /ImLogo ${logoObjectId} 0 R >>`
+        : "";
     objects[pageObj] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObj} 0 R >>`;
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xObjects} >> /Contents ${contentObj} 0 R >>`;
     objects[contentObj] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
   });
 
@@ -280,12 +364,18 @@ function makePdf(lines: PdfLine[]) {
 
   pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
 
-  return new Blob([pdf], { type: "application/pdf" });
+  const bytes = new Uint8Array(pdf.length);
+  for (let index = 0; index < pdf.length; index += 1) {
+    bytes[index] = pdf.charCodeAt(index) & 0xff;
+  }
+
+  return new Blob([bytes], { type: "application/pdf" });
 }
 
-function downloadPoPdf(modal: HTMLElement) {
+async function downloadPoPdf(modal: HTMLElement) {
   const { lines, fileName } = collectPoLines(modal);
-  const blob = makePdf(lines);
+  const logoImage = await imageUrlToPdfJpeg(DP_PDF_LOGO_DATA_URL);
+  const blob = makePdf(lines, logoImage);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -316,7 +406,9 @@ export default function PoPdfEnhancer() {
         button.className = "modal-secondary";
         button.textContent = "Download PDF";
         button.setAttribute("data-po-pdf-button", "true");
-        button.addEventListener("click", () => downloadPoPdf(modal));
+        button.addEventListener("click", () => {
+          void downloadPoPdf(modal);
+        });
 
         actions.insertBefore(button, actions.firstChild);
       });
