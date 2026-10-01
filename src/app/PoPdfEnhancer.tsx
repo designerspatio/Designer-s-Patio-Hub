@@ -70,8 +70,7 @@ function collectPoLines(modal: HTMLElement): { lines: PdfLine[]; fileName: strin
     "Purchase-Order";
 
   const lines: PdfLine[] = [
-    { text: "DESIGNER'S PATIO", size: 17, bold: true },
-    { text: kicker || `PURCHASE ORDER #${poNumber}`, size: 15, bold: true, gapBefore: 3 },
+    { text: kicker || `PURCHASE ORDER #${poNumber}`, size: 15, bold: true },
     { text: vendor || "Vendor", size: 12, bold: true, gapBefore: 4 },
   ];
 
@@ -160,12 +159,12 @@ function escapePdf(value: string) {
 function makePdf(lines: PdfLine[]) {
   const pages: PdfLine[][] = [];
   let page: PdfLine[] = [];
-  let y = 742;
+  let y = 625;
 
   const pushPage = () => {
     if (page.length) pages.push(page);
     page = [];
-    y = 742;
+    y = 625;
   };
 
   for (const item of lines) {
@@ -201,15 +200,35 @@ function makePdf(lines: PdfLine[]) {
   objects[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
 
   pages.forEach((pageLines, pageIndex) => {
-    let cursorY = 742;
+    let cursorY = 625;
     const commands: string[] = [];
+
+    commands.push(
+      "0 0 0 rg",
+      "274 708 64 64 re f",
+      "BT",
+      "/F1 16 Tf",
+      "241 683 Td",
+      "(DESIGNER'S PATIO) Tj",
+      "ET",
+      "0 0 0 RG",
+      "0.8 w",
+      "150 670 m",
+      "462 670 l",
+      "S",
+      "BT",
+      "/F1 8 Tf",
+      "203 655 Td",
+      "(LUXURIOUS OUTDOOR FURNISHINGS) Tj",
+      "ET"
+    );
 
     if (pageIndex > 0) {
       commands.push(
         "BT",
-        "/F2 10 Tf",
-        "48 760 Td",
-        `(DESIGNER'S PATIO - PURCHASE ORDER CONTINUED) Tj`,
+        "/F2 8.5 Tf",
+        "48 638 Td",
+        "(PURCHASE ORDER CONTINUED) Tj",
         "ET"
       );
     }
