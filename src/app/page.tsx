@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient, type Session } from "@supabase/supabase-js";
+import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
 import {
   useCallback,
   useEffect,
@@ -6825,7 +6826,7 @@ export default function Home() {
     if (!url) return null;
 
     try {
-      const response = await fetch(url, { mode: "cors" });
+      const response = await fetch(url);
       if (!response.ok) return null;
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -6876,10 +6877,12 @@ export default function Home() {
   function buildBrandedQuotePdf({
     client,
     salesperson,
+    logoImage,
     productImages,
   }: {
     client: Client | undefined;
     salesperson: Profile | undefined;
+    logoImage: { binary: string; width: number; height: number } | null;
     productImages: Record<
       string,
       { binary: string; width: number; height: number } | null
@@ -6905,6 +6908,9 @@ export default function Home() {
     };
 
     const images: PdfImage[] = [];
+    if (logoImage) {
+      images.push({ name: "LOGO", ...logoImage });
+    }
 
     const itemImageNames: Record<string, string> = {};
     quoteItems.forEach((item, index) => {
@@ -7092,36 +7098,12 @@ export default function Home() {
       : "";
 
     // FIRST PAGE HEADER
-    const dpWordmark = "DESIGNER'S PATIO";
-    const dpTagline = "LUXURIOUS OUTDOOR FURNISHINGS";
-    const dpLogoBlack = [0, 0, 0] as const;
-    const dpLogoLeft = 34;
-    textAt(
-      dpLogoLeft +
-        (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpWordmark, 15, false)) / 2,
-      43,
-      dpWordmark,
-      15,
-      false,
-      dpLogoBlack
-    );
-    lineAt(
-      dpLogoLeft,
-      66,
-      dpLogoLeft + DP_PDF_LOGO_WIDTH,
-      66,
-      0.8,
-      dpLogoBlack
-    );
-    textAt(
-      dpLogoLeft +
-        (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpTagline, 6.8, false)) / 2,
-      78,
-      dpTagline,
-      6.8,
-      false,
-      dpLogoBlack
-    );
+    if (logoImage) {
+      drawImage("LOGO", 34, 18, 230, 160);
+    } else {
+      textAt(34, 50, "DESIGNER'S PATIO", 15, true, DARK);
+      textAt(34, 72, "LUXURIOUS OUTDOOR FURNISHINGS", 6.8, false, DARK);
+    }
     textAt(330, 34, "QUOTE", 22, true, NAVY);
     textAt(
       PAGE_W - 34,
@@ -7486,10 +7468,12 @@ export default function Home() {
   function buildBrandedSalesOrderPdf({
     client,
     salesperson,
+    logoImage,
     productImages,
   }: {
     client: Client | undefined;
     salesperson: Profile | undefined;
+    logoImage: { binary: string; width: number; height: number } | null;
     productImages: Record<
       string,
       { binary: string; width: number; height: number } | null
@@ -7547,6 +7531,9 @@ export default function Home() {
     };
 
     const images: PdfImage[] = [];
+    if (logoImage) {
+      images.push({ name: "LOGO", ...logoImage });
+    }
 
     const itemImageNames: Record<string, string> = {};
     saleItems.forEach((item, index) => {
@@ -7734,36 +7721,12 @@ export default function Home() {
       : "";
 
     // FIRST PAGE HEADER
-    const dpWordmark = "DESIGNER'S PATIO";
-    const dpTagline = "LUXURIOUS OUTDOOR FURNISHINGS";
-    const dpLogoBlack = [0, 0, 0] as const;
-    const dpLogoLeft = 34;
-    textAt(
-      dpLogoLeft +
-        (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpWordmark, 15, false)) / 2,
-      43,
-      dpWordmark,
-      15,
-      false,
-      dpLogoBlack
-    );
-    lineAt(
-      dpLogoLeft,
-      66,
-      dpLogoLeft + DP_PDF_LOGO_WIDTH,
-      66,
-      0.8,
-      dpLogoBlack
-    );
-    textAt(
-      dpLogoLeft +
-        (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpTagline, 6.8, false)) / 2,
-      78,
-      dpTagline,
-      6.8,
-      false,
-      dpLogoBlack
-    );
+    if (logoImage) {
+      drawImage("LOGO", 34, 18, 230, 160);
+    } else {
+      textAt(34, 50, "DESIGNER'S PATIO", 15, true, DARK);
+      textAt(34, 72, "LUXURIOUS OUTDOOR FURNISHINGS", 6.8, false, DARK);
+    }
     textAt(330, 34, "SALES ORDER", 22, true, NAVY);
     textAt(
       PAGE_W - 34,
@@ -8087,6 +8050,8 @@ export default function Home() {
 
     setMessage("Building branded quote PDF...");
 
+    const logoImage = await imageUrlToPdfJpeg(DP_PDF_LOGO_DATA_URL);
+
     const client = clients.find(
       (entry) => entry.id === quoteForm.client_id
     );
@@ -8105,6 +8070,7 @@ export default function Home() {
     const bytes = buildBrandedQuotePdf({
       client,
       salesperson,
+      logoImage,
       productImages,
     });
     const blob = new Blob([bytes], { type: "application/pdf" });
@@ -8127,6 +8093,8 @@ export default function Home() {
 
     setMessage("Building sales order PDF...");
 
+    const logoImage = await imageUrlToPdfJpeg(DP_PDF_LOGO_DATA_URL);
+
     const client = clients.find((entry) => entry.id === selectedSale.client_id);
     const salesperson = team.find(
       (entry) => entry.id === selectedSale.salesperson_user_id
@@ -8143,6 +8111,7 @@ export default function Home() {
     const bytes = buildBrandedSalesOrderPdf({
       client,
       salesperson,
+      logoImage,
       productImages,
     });
     const blob = new Blob([bytes], { type: "application/pdf" });
