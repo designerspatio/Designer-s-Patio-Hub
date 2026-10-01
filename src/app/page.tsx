@@ -7095,16 +7095,11 @@ export default function Home() {
     const dpWordmark = "DESIGNER'S PATIO";
     const dpTagline = "LUXURIOUS OUTDOOR FURNISHINGS";
     const dpLogoBlack = [0, 0, 0] as const;
-    const dpLogoSquare = 64;
     const dpLogoLeft = 34;
-    const dpLogoSquareX =
-      dpLogoLeft + (DP_PDF_LOGO_WIDTH - dpLogoSquare) / 2;
-
-    fillRect(dpLogoSquareX, 26, dpLogoSquare, dpLogoSquare, dpLogoBlack);
     textAt(
       dpLogoLeft +
         (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpWordmark, 15, false)) / 2,
-      99,
+      43,
       dpWordmark,
       15,
       false,
@@ -7112,16 +7107,16 @@ export default function Home() {
     );
     lineAt(
       dpLogoLeft,
-      122,
+      66,
       dpLogoLeft + DP_PDF_LOGO_WIDTH,
-      122,
+      66,
       0.8,
       dpLogoBlack
     );
     textAt(
       dpLogoLeft +
         (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpTagline, 6.8, false)) / 2,
-      132,
+      78,
       dpTagline,
       6.8,
       false,
@@ -7742,16 +7737,11 @@ export default function Home() {
     const dpWordmark = "DESIGNER'S PATIO";
     const dpTagline = "LUXURIOUS OUTDOOR FURNISHINGS";
     const dpLogoBlack = [0, 0, 0] as const;
-    const dpLogoSquare = 64;
     const dpLogoLeft = 34;
-    const dpLogoSquareX =
-      dpLogoLeft + (DP_PDF_LOGO_WIDTH - dpLogoSquare) / 2;
-
-    fillRect(dpLogoSquareX, 26, dpLogoSquare, dpLogoSquare, dpLogoBlack);
     textAt(
       dpLogoLeft +
         (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpWordmark, 15, false)) / 2,
-      99,
+      43,
       dpWordmark,
       15,
       false,
@@ -7759,16 +7749,16 @@ export default function Home() {
     );
     lineAt(
       dpLogoLeft,
-      122,
+      66,
       dpLogoLeft + DP_PDF_LOGO_WIDTH,
-      122,
+      66,
       0.8,
       dpLogoBlack
     );
     textAt(
       dpLogoLeft +
         (DP_PDF_LOGO_WIDTH - pdfTextWidth(dpTagline, 6.8, false)) / 2,
-      132,
+      78,
       dpTagline,
       6.8,
       false,
