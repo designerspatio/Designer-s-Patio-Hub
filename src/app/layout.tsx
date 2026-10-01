@@ -1,5 +1,6 @@
 import "../../globals.css";
 import type { ReactNode } from "react";
+import PoPdfEnhancer from "./PoPdfEnhancer";
 
 export const metadata = {
   title: "Designer’s Patio Hub",
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <PoPdfEnhancer />
+      </body>
     </html>
   );
 }
