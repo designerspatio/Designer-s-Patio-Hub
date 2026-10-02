@@ -2314,6 +2314,8 @@ export default function Home() {
   useEffect(() => {
     setRecordScope("mine");
     setScopeSalespersonId("");
+    setShowArchivedCatalogs(false);
+    setShowArchivedPriceLists(false);
   }, [session?.user?.id]);
 
   const [team, setTeam] = useState<Profile[]>([]);
@@ -2652,6 +2654,8 @@ export default function Home() {
   const [catalogItems, setCatalogItems] =
     useState<CatalogItem[]>([]);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [showArchivedCatalogs, setShowArchivedCatalogs] = useState(false);
+  const [showArchivedPriceLists, setShowArchivedPriceLists] = useState(false);
   const [catalogLoading, setCatalogLoading] =
     useState(false);
   const [selectedCatalog, setSelectedCatalog] =
@@ -4467,12 +4471,19 @@ export default function Home() {
     };
   }, [scopedPurchaseOrders, purchaseOrderItemsSummary]);
 
+  const visibleCatalogs = useMemo(() => catalogs.filter(catalog =>
+    showArchivedCatalogs ? catalog.active === false : catalog.active !== false
+  ), [catalogs, showArchivedCatalogs]);
+  const visiblePriceLists = useMemo(() => priceLists.filter(priceList =>
+    showArchivedPriceLists ? priceList.active === false : priceList.active !== false
+  ), [priceLists, showArchivedPriceLists]);
+
   const filteredCatalogs = useMemo(() => {
     const term = catalogSearch.trim().toLowerCase();
 
-    if (!term) return catalogs;
+    if (!term) return visibleCatalogs;
 
-    return catalogs.filter((catalog) =>
+    return visibleCatalogs.filter((catalog) =>
       [
         catalog.title,
         catalog.catalog_year,
@@ -4485,30 +4496,30 @@ export default function Home() {
         .toLowerCase()
         .includes(term)
     );
-  }, [catalogs, catalogSearch, manufacturers]);
+  }, [visibleCatalogs, catalogSearch, manufacturers]);
 
   const catalogStats = useMemo(
     () => ({
-      total: catalogs.length,
-      active: catalogs.filter(
+      total: visibleCatalogs.length,
+      active: visibleCatalogs.filter(
         (catalog) => catalog.active !== false
       ).length,
-      withPdf: catalogs.filter(
+      withPdf: visibleCatalogs.filter(
         (catalog) => Boolean(catalog.file_path)
       ).length,
       manufacturers: new Set(
-        catalogs.map((catalog) => catalog.manufacturer_id)
+        visibleCatalogs.map((catalog) => catalog.manufacturer_id)
       ).size,
     }),
-    [catalogs]
+    [visibleCatalogs]
   );
 
   const filteredPriceLists = useMemo(() => {
     const term = priceListSearch.trim().toLowerCase();
 
-    if (!term) return priceLists;
+    if (!term) return visiblePriceLists;
 
-    return priceLists.filter((priceList) =>
+    return visiblePriceLists.filter((priceList) =>
       [
         priceList.title,
         priceList.version,
@@ -4525,24 +4536,24 @@ export default function Home() {
         .toLowerCase()
         .includes(term)
     );
-  }, [priceLists, priceListSearch, manufacturers]);
+  }, [visiblePriceLists, priceListSearch, manufacturers]);
 
   const priceListStats = useMemo(
     () => ({
-      total: priceLists.length,
-      active: priceLists.filter(
+      total: visiblePriceLists.length,
+      active: visiblePriceLists.filter(
         (priceList) => priceList.active !== false
       ).length,
-      approved: priceLists.filter(
+      approved: visiblePriceLists.filter(
         (priceList) =>
           priceList.active !== false &&
           priceList.approved_for_pricing === true
       ).length,
-      withPdf: priceLists.filter(
+      withPdf: visiblePriceLists.filter(
         (priceList) => Boolean(priceList.file_path)
       ).length,
     }),
-    [priceLists]
+    [visiblePriceLists]
   );
 
   const filteredVendorInvoices = useMemo(() => {
@@ -20676,7 +20687,7 @@ export default function Home() {
 
                 <button
                   className="page-primary"
-                  onClick={openNewCatalog}
+                  onClick={() => { setShowArchivedCatalogs(false); setCatalogSearch(""); openNewCatalog(); }}
                 >
                   + New Catalog
                 </button>
@@ -20684,12 +20695,12 @@ export default function Home() {
 
               <div className="library-stat-grid">
                 <MiniStat
-                  label="CATALOGS"
+                  label={showArchivedCatalogs ? "ARCHIVED CATALOGS" : "ACTIVE CATALOGS"}
                   value={catalogStats.total.toString()}
                 />
                 <MiniStat
-                  label="ACTIVE"
-                  value={catalogStats.active.toString()}
+                  label="TOTAL STORED"
+                  value={catalogs.length.toString()}
                 />
                 <MiniStat
                   label="WITH PDF"
@@ -20699,6 +20710,20 @@ export default function Home() {
                   label="MANUFACTURERS"
                   value={catalogStats.manufacturers.toString()}
                 />
+              </div>
+
+              <div className="library-archive-controls">
+                <div className="record-scope-toggle" role="group" aria-label="Catalogs view">
+                  <button type="button" aria-pressed={!showArchivedCatalogs} onClick={() => setShowArchivedCatalogs(false)}>
+                    Active ({catalogs.filter(item => item.active !== false).length})
+                  </button>
+                  <button type="button" aria-pressed={showArchivedCatalogs} onClick={() => setShowArchivedCatalogs(true)}>
+                    Archive ({catalogs.filter(item => item.active === false).length})
+                  </button>
+                </div>
+                <p>{showArchivedCatalogs
+                  ? "Inactive catalogs are kept here. Open a record and turn Active back on to restore it."
+                  : "Showing active catalogs only. Switching a record to inactive moves it to the Archive."}</p>
               </div>
 
               <div className="search-card">
@@ -20729,10 +20754,11 @@ export default function Home() {
                 ) : filteredCatalogs.length === 0 ? (
                   <div className="empty-state">
                     <div className="empty-icon">◇</div>
-                    <strong>No catalogs yet</strong>
+                    <strong>{catalogSearch.trim() ? "No matching catalogs" : showArchivedCatalogs ? "No archived catalogs" : "No active catalogs"}</strong>
                     <span>
-                      Add a manufacturer catalog, then upload the
-                      PDF and build its searchable product records.
+                      {catalogSearch.trim() ? "Try another search in this view."
+                        : showArchivedCatalogs ? "Records appear here when you switch them to inactive."
+                        : "Add a new record, or open the Archive to restore an inactive one."}
                     </span>
                   </div>
                 ) : (
@@ -20782,14 +20808,14 @@ export default function Home() {
                         <div>
                           <span
                             className={`library-active-badge ${
-                              catalog.active
+                              catalog.active !== false
                                 ? "active"
                                 : "inactive"
                             }`}
                           >
-                            {catalog.active
+                            {catalog.active !== false
                               ? "Active"
-                              : "Inactive"}
+                              : "Archived"}
                           </span>
                         </div>
                         <div>
@@ -20831,7 +20857,7 @@ export default function Home() {
 
                 <button
                   className="page-primary"
-                  onClick={openNewPriceList}
+                  onClick={() => { setShowArchivedPriceLists(false); setPriceListSearch(""); openNewPriceList(); }}
                 >
                   + New Price List
                 </button>
@@ -20839,12 +20865,12 @@ export default function Home() {
 
               <div className="library-stat-grid">
                 <MiniStat
-                  label="PRICE LISTS"
+                  label={showArchivedPriceLists ? "ARCHIVED PRICE LISTS" : "ACTIVE PRICE LISTS"}
                   value={priceListStats.total.toString()}
                 />
                 <MiniStat
-                  label="ACTIVE"
-                  value={priceListStats.active.toString()}
+                  label="TOTAL STORED"
+                  value={priceLists.length.toString()}
                 />
                 <MiniStat
                   label="APPROVED"
@@ -20854,6 +20880,20 @@ export default function Home() {
                   label="WITH PDF"
                   value={priceListStats.withPdf.toString()}
                 />
+              </div>
+
+              <div className="library-archive-controls">
+                <div className="record-scope-toggle" role="group" aria-label="Price Lists view">
+                  <button type="button" aria-pressed={!showArchivedPriceLists} onClick={() => setShowArchivedPriceLists(false)}>
+                    Active ({priceLists.filter(item => item.active !== false).length})
+                  </button>
+                  <button type="button" aria-pressed={showArchivedPriceLists} onClick={() => setShowArchivedPriceLists(true)}>
+                    Archive ({priceLists.filter(item => item.active === false).length})
+                  </button>
+                </div>
+                <p>{showArchivedPriceLists
+                  ? "Inactive price lists are kept here. Open a record and turn Active back on to restore it."
+                  : "Showing active price lists only. Switching a record to inactive moves it to the Archive."}</p>
               </div>
 
               <div className="search-card">
@@ -20886,10 +20926,11 @@ export default function Home() {
                 ) : filteredPriceLists.length === 0 ? (
                   <div className="empty-state">
                     <div className="empty-icon">$</div>
-                    <strong>No price lists yet</strong>
+                    <strong>{priceListSearch.trim() ? "No matching price lists" : showArchivedPriceLists ? "No archived price lists" : "No active price lists"}</strong>
                     <span>
-                      Add a manufacturer price list, upload its PDF,
-                      then create the structured SKU and grade prices.
+                      {priceListSearch.trim() ? "Try another search in this view."
+                        : showArchivedPriceLists ? "Records appear here when you switch them to inactive."
+                        : "Add a new record, or open the Archive to restore an inactive one."}
                     </span>
                   </div>
                 ) : (
@@ -20914,11 +20955,9 @@ export default function Home() {
                         <div className="library-row-primary">
                           <strong>{priceList.title}</strong>
                           <span>
-                            {priceList.expiration_date
-                              ? `Expires ${priceList.expiration_date}`
-                              : priceList.active
-                              ? "No expiration entered"
-                              : "Inactive"}
+                            {priceList.active === false ? "Archived"
+                              : priceList.expiration_date ? `Expires ${priceList.expiration_date}`
+                              : "No expiration entered"}
                           </span>
                         </div>
                         <div>
@@ -20935,14 +20974,13 @@ export default function Home() {
                         <div>
                           <span
                             className={`pricing-authority-badge ${
-                              priceList.approved_for_pricing
+                              priceList.active !== false && priceList.approved_for_pricing
                                 ? "approved"
                                 : "not-approved"
                             }`}
                           >
-                            {priceList.approved_for_pricing
-                              ? "Approved"
-                              : "Not Approved"}
+                            {priceList.active === false ? "Inactive"
+                              : priceList.approved_for_pricing ? "Approved" : "Not Approved"}
                           </span>
                         </div>
                         <div>
@@ -32101,6 +32139,9 @@ function FormField({
 }
 
 const appCss = `
+  .library-archive-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; margin: 18px 0; }
+  .library-archive-controls p { flex: 1; min-width: 220px; margin: 0; font-size: 12px; line-height: 1.6; color: #526579; }
+
   .record-scope-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 20px 0; padding: 16px 20px; background: #fff; border: 1px solid #dce4ee; border-radius: 12px; color: #152c47; }
   .record-scope-bar p { margin: 5px 0 0; font-size: 12px; color: #526579; }
   .record-scope-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
