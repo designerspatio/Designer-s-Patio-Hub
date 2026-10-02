@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient, type Session } from "@supabase/supabase-js";
+import SalesDashboard from "./SalesDashboard";
 import { matchesRecordScope, type RecordScope } from "./recordScope";
 import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
 import {
@@ -2306,6 +2307,7 @@ export default function Home() {
 
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [dashboardDirty, setDashboardDirty] = useState(false);
   const [recordScope, setRecordScope] = useState<RecordScope>("mine");
   const [scopeSalespersonId, setScopeSalespersonId] = useState("");
 
@@ -4950,6 +4952,8 @@ export default function Home() {
 
   async function signOut() {
     if (!supabase) return;
+    if (dashboardDirty && !window.confirm("Your personal workspace has unsaved changes. Sign out without saving?")) return;
+    setDashboardDirty(false);
 
     await supabase.auth.signOut();
     setProfile(null);
@@ -20970,150 +20974,27 @@ export default function Home() {
           )}
 
 
-          {view === "dashboard" && (
-            <section>
-              <div className="welcome-card">
-                <div>
-                  <div className="welcome-role">
-                    {profile?.role || "Team Member"}
-                  </div>
-
-                  <h1>Welcome back, {firstName}.</h1>
-
-                  <p>
-                    The Hub is connected and your client directory is
-                    officially live.
-                  </p>
-                </div>
-
-                <button
-                  className="welcome-action"
-                  onClick={() => setView("clients")}
-                >
-                  Open Clients →
-                </button>
-              </div>
-
-              <div className="stats-grid">
-                <StatCard
-                  label="CLIENTS"
-                  value={
-                    clientsLoading
-                      ? "..."
-                      : clientStats.total.toLocaleString()
-                  }
-                  detail="Live client records"
-                />
-
-                <StatCard
-                  label="WITH EMAIL"
-                  value={clientStats.withEmail.toLocaleString()}
-                  detail="Ready for communication"
-                />
-
-                <StatCard
-                  label="WITH PHONE"
-                  value={clientStats.withPhone.toLocaleString()}
-                  detail="Phone contacts"
-                />
-
-                <StatCard
-                  label="STATES"
-                  value={clientStats.states.toLocaleString()}
-                  detail="Client locations"
-                />
-              </div>
-
-              <div className="dashboard-grid">
-                <section className="panel">
-                  <div className="panel-header">
-                    <div>
-                      <div className="panel-eyebrow">
-                        CLIENT DIRECTORY
-                      </div>
-                      <h2>Quick access</h2>
-                    </div>
-
-                    <button
-                      className="text-button"
-                      onClick={() => setView("clients")}
-                    >
-                      View all
-                    </button>
-                  </div>
-
-                  {clientsLoading ? (
-                    <div className="empty-state">
-                      Loading clients...
-                    </div>
-                  ) : (
-                    <div className="quick-client-list">
-                      {scopedClients.slice(0, 6).map((client) => (
-                        <button
-                          key={client.id}
-                          className="quick-client-row"
-                          onClick={() => {
-                            setView("clients");
-                            openClient(client);
-                          }}
-                        >
-                          <div className="client-initial">
-                            {getClientName(client)
-                              .charAt(0)
-                              .toUpperCase()}
-                          </div>
-
-                          <div className="quick-client-copy">
-                            <strong>{getClientName(client)}</strong>
-                            <span>
-                              {getLocation(client) ||
-                                client.email ||
-                                "No location entered"}
-                            </span>
-                          </div>
-
-                          <span className="chevron">›</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                <section className="panel system-panel">
-                  <div className="panel-eyebrow">SYSTEM</div>
-                  <h2>Hub status</h2>
-
-                  <StatusRow
-                    label="Vercel production app"
-                    value="Connected"
-                  />
-                  <StatusRow
-                    label="Supabase authentication"
-                    value="Connected"
-                  />
-                  <StatusRow
-                    label="Employee profile"
-                    value={profile?.role || "Connected"}
-                  />
-                  <StatusRow
-                    label="Client database"
-                    value={`${clientStats.total} loaded`}
-                  />
-
-                  <div className="commission-box">
-                    <span>Your default commission</span>
-                    <strong>
-                      {(
-                        (profile?.default_commission_rate || 0.02) *
-                        100
-                      ).toFixed(0)}
-                      %
-                    </strong>
-                  </div>
-                </section>
-              </div>
-            </section>
-          )}
+          <div hidden={view !== "dashboard"}>
+            <SalesDashboard
+              key={session.user.id}
+              userId={session.user.id}
+              firstName={firstName}
+              onDirtyChange={setDashboardDirty}
+              supabase={supabase}
+              scopeLabel={recordScope === "mine" ? "My clients & quotes" : scopeSalespersonId === "__unassigned__" ? "Unassigned clients & quotes" : scopeSalespersonId ? `${salespersonName(scopeSalespersonId)} · clients & quotes` : "All clients & quotes"}
+              loading={clientsLoading || quotesLoading}
+              clients={scopedClients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              allClients={clients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              quotes={scopedQuotes}
+              onClient={id => { const client = clients.find(item => item.id === id); if (client) { setView("clients"); void openClient(client); } }}
+              onQuote={id => { const quote = quotes.find(item => item.id === id); if (quote) { setView("quotes"); void openQuote(quote); } }}
+              onNewClient={() => { setView("clients"); openNewClient(); }}
+              onNewQuote={() => { setView("quotes"); openNewQuote(); }}
+              onScan={() => setView("scan")}
+              onClients={() => setView("clients")}
+              onQuotes={() => setView("quotes")}
+            />
+          </div>
 
           {view === "scan" && (
             <section>
