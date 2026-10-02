@@ -1,6 +1,8 @@
 "use client";
 
 import { createClient, type Session } from "@supabase/supabase-js";
+import SalesDashboard from "./SalesDashboard";
+import { matchesRecordScope, type RecordScope } from "./recordScope";
 import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
 import {
   useCallback,
@@ -2305,6 +2307,17 @@ export default function Home() {
 
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [dashboardDirty, setDashboardDirty] = useState(false);
+  const [recordScope, setRecordScope] = useState<RecordScope>("mine");
+  const [scopeSalespersonId, setScopeSalespersonId] = useState("");
+
+  useEffect(() => {
+    setRecordScope("mine");
+    setScopeSalespersonId("");
+    setShowArchivedCatalogs(false);
+    setShowArchivedPriceLists(false);
+  }, [session?.user?.id]);
+
   const [team, setTeam] = useState<Profile[]>([]);
   const [adminTeam, setAdminTeam] = useState<Profile[]>([]);
   const [adminTeamRoles, setAdminTeamRoles] = useState<string[]>([
@@ -2641,6 +2654,8 @@ export default function Home() {
   const [catalogItems, setCatalogItems] =
     useState<CatalogItem[]>([]);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [showArchivedCatalogs, setShowArchivedCatalogs] = useState(false);
+  const [showArchivedPriceLists, setShowArchivedPriceLists] = useState(false);
   const [catalogLoading, setCatalogLoading] =
     useState(false);
   const [selectedCatalog, setSelectedCatalog] =
@@ -4119,12 +4134,30 @@ export default function Home() {
     acknowledgementIssueLibrary,
   ]);
 
+  // Keep the full fetched arrays for relationships and editing. Scope only
+  // directory views and their totals; Supabase remains the access authority.
+  const scopedClients = useMemo(() => clients.filter((client) =>
+    matchesRecordScope(client.assigned_user_id, recordScope, session?.user?.id, scopeSalespersonId)
+  ), [clients, recordScope, session?.user?.id, scopeSalespersonId]);
+  const scopedQuotes = useMemo(() => quotes.filter((quote) =>
+    matchesRecordScope(quote.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
+  ), [quotes, recordScope, session?.user?.id, scopeSalespersonId]);
+  const scopedSalesOrders = useMemo(() => salesOrders.filter((order) =>
+    matchesRecordScope(order.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
+  ), [salesOrders, recordScope, session?.user?.id, scopeSalespersonId]);
+  const scopedPurchaseOrders = useMemo(() => {
+    const owners = new Map(salesOrders.map((order) => [order.id, order.salesperson_user_id]));
+    return purchaseOrders.filter((order) => matchesRecordScope(
+      owners.get(order.sales_order_id), recordScope, session?.user?.id, scopeSalespersonId
+    ));
+  }, [purchaseOrders, salesOrders, recordScope, session?.user?.id, scopeSalespersonId]);
+
   const filteredClients = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    if (!term) return clients;
+    if (!term) return scopedClients;
 
-    return clients.filter((client) => {
+    return scopedClients.filter((client) => {
       const salesperson =
         team.find((person) => person.id === client.assigned_user_id)
           ?.display_name || "";
@@ -4145,7 +4178,7 @@ export default function Home() {
 
       return searchable.includes(term);
     });
-  }, [clients, search, team]);
+  }, [scopedClients, search, team]);
 
   const filteredAdminTeam = useMemo(() => {
     const term =
@@ -4187,22 +4220,22 @@ export default function Home() {
   }, [adminTeam]);
 
   const clientStats = useMemo(() => {
-    const withEmail = clients.filter((client) => client.email).length;
-    const withPhone = clients.filter((client) => client.phone).length;
+    const withEmail = scopedClients.filter((client) => client.email).length;
+    const withPhone = scopedClients.filter((client) => client.phone).length;
 
     const states = new Set(
-      clients
+      scopedClients
         .map((client) => client.state)
         .filter((state): state is string => Boolean(state))
     );
 
     return {
-      total: clients.length,
+      total: scopedClients.length,
       withEmail,
       withPhone,
       states: states.size,
     };
-  }, [clients]);
+  }, [scopedClients]);
 
   const filteredManufacturers = useMemo(() => {
     const term = manufacturerSearch.trim().toLowerCase();
@@ -4242,7 +4275,7 @@ export default function Home() {
 
   const filteredQuotes = useMemo(() => {
     const term = quoteSearch.trim().toLowerCase();
-    const visibleQuotes = quotes.filter((quote) =>
+    const visibleQuotes = scopedQuotes.filter((quote) =>
       showArchivedQuotes
         ? quote.status === "Archived"
         : quote.status !== "Archived"
@@ -4271,7 +4304,7 @@ export default function Home() {
         .includes(term);
     });
   }, [
-    quotes,
+    scopedQuotes,
     quoteSearch,
     clients,
     team,
@@ -4279,10 +4312,10 @@ export default function Home() {
   ]);
 
   const quoteStats = useMemo(() => {
-    const activeQuotes = quotes.filter(
+    const activeQuotes = scopedQuotes.filter(
       (quote) => quote.status !== "Archived"
     );
-    const archived = quotes.filter(
+    const archived = scopedQuotes.filter(
       (quote) => quote.status === "Archived"
     ).length;
     const drafts = activeQuotes.filter(
@@ -4313,14 +4346,14 @@ export default function Home() {
       archived,
       totalValue,
     };
-  }, [quotes, quoteItemsSummary]);
+  }, [scopedQuotes, quoteItemsSummary]);
 
   const filteredSalesOrders = useMemo(() => {
     const term = salesSearch.trim().toLowerCase();
 
-    if (!term) return salesOrders;
+    if (!term) return scopedSalesOrders;
 
-    return salesOrders.filter((order) => {
+    return scopedSalesOrders.filter((order) => {
       const salesperson = team.find(
         (person) => person.id === order.salesperson_user_id
       );
@@ -4337,14 +4370,14 @@ export default function Home() {
         .toLowerCase()
         .includes(term);
     });
-  }, [salesOrders, salesSearch, clients, team]);
+  }, [scopedSalesOrders, salesSearch, clients, team]);
 
   const salesStats = useMemo(() => {
-    const open = salesOrders.filter(
+    const open = scopedSalesOrders.filter(
       (order) => order.status !== "Closed"
     ).length;
 
-    const totalValue = salesOrders.reduce((sum, order) => {
+    const totalValue = scopedSalesOrders.reduce((sum, order) => {
       const items = salesItemsSummary[order.id] || [];
       const merchandise = items.reduce(
         (itemSum, item) =>
@@ -4364,18 +4397,18 @@ export default function Home() {
     }, 0);
 
     return {
-      total: salesOrders.length,
+      total: scopedSalesOrders.length,
       open,
       totalValue,
     };
-  }, [salesOrders, salesItemsSummary]);
+  }, [scopedSalesOrders, salesItemsSummary]);
 
   const filteredPurchaseOrders = useMemo(() => {
     const term = purchaseOrderSearch.trim().toLowerCase();
 
-    if (!term) return purchaseOrders;
+    if (!term) return scopedPurchaseOrders;
 
-    return purchaseOrders.filter((order) => {
+    return scopedPurchaseOrders.filter((order) => {
       const maker = manufacturers.find(
         (manufacturer) => manufacturer.id === order.manufacturer_id
       );
@@ -4398,24 +4431,24 @@ export default function Home() {
         .includes(term);
     });
   }, [
-    purchaseOrders,
+    scopedPurchaseOrders,
     purchaseOrderSearch,
     manufacturers,
     salesOrders,
   ]);
 
   const purchaseOrderStats = useMemo(() => {
-    const open = purchaseOrders.filter(
+    const open = scopedPurchaseOrders.filter(
       (order) => order.status !== "Closed"
     ).length;
 
-    const inProcess = purchaseOrders.filter(
+    const inProcess = scopedPurchaseOrders.filter(
       (order) =>
         order.status !== "Draft" &&
         order.status !== "Closed"
     ).length;
 
-    const expectedCost = purchaseOrders.reduce((sum, order) => {
+    const expectedCost = scopedPurchaseOrders.reduce((sum, order) => {
       const items = purchaseOrderItemsSummary[order.id] || [];
       const merchandise = items.reduce(
         (itemSum, item) =>
@@ -4431,19 +4464,26 @@ export default function Home() {
     }, 0);
 
     return {
-      total: purchaseOrders.length,
+      total: scopedPurchaseOrders.length,
       open,
       inProcess,
       expectedCost,
     };
-  }, [purchaseOrders, purchaseOrderItemsSummary]);
+  }, [scopedPurchaseOrders, purchaseOrderItemsSummary]);
+
+  const visibleCatalogs = useMemo(() => catalogs.filter(catalog =>
+    showArchivedCatalogs ? catalog.active === false : catalog.active !== false
+  ), [catalogs, showArchivedCatalogs]);
+  const visiblePriceLists = useMemo(() => priceLists.filter(priceList =>
+    showArchivedPriceLists ? priceList.active === false : priceList.active !== false
+  ), [priceLists, showArchivedPriceLists]);
 
   const filteredCatalogs = useMemo(() => {
     const term = catalogSearch.trim().toLowerCase();
 
-    if (!term) return catalogs;
+    if (!term) return visibleCatalogs;
 
-    return catalogs.filter((catalog) =>
+    return visibleCatalogs.filter((catalog) =>
       [
         catalog.title,
         catalog.catalog_year,
@@ -4456,30 +4496,30 @@ export default function Home() {
         .toLowerCase()
         .includes(term)
     );
-  }, [catalogs, catalogSearch, manufacturers]);
+  }, [visibleCatalogs, catalogSearch, manufacturers]);
 
   const catalogStats = useMemo(
     () => ({
-      total: catalogs.length,
-      active: catalogs.filter(
+      total: visibleCatalogs.length,
+      active: visibleCatalogs.filter(
         (catalog) => catalog.active !== false
       ).length,
-      withPdf: catalogs.filter(
+      withPdf: visibleCatalogs.filter(
         (catalog) => Boolean(catalog.file_path)
       ).length,
       manufacturers: new Set(
-        catalogs.map((catalog) => catalog.manufacturer_id)
+        visibleCatalogs.map((catalog) => catalog.manufacturer_id)
       ).size,
     }),
-    [catalogs]
+    [visibleCatalogs]
   );
 
   const filteredPriceLists = useMemo(() => {
     const term = priceListSearch.trim().toLowerCase();
 
-    if (!term) return priceLists;
+    if (!term) return visiblePriceLists;
 
-    return priceLists.filter((priceList) =>
+    return visiblePriceLists.filter((priceList) =>
       [
         priceList.title,
         priceList.version,
@@ -4496,24 +4536,24 @@ export default function Home() {
         .toLowerCase()
         .includes(term)
     );
-  }, [priceLists, priceListSearch, manufacturers]);
+  }, [visiblePriceLists, priceListSearch, manufacturers]);
 
   const priceListStats = useMemo(
     () => ({
-      total: priceLists.length,
-      active: priceLists.filter(
+      total: visiblePriceLists.length,
+      active: visiblePriceLists.filter(
         (priceList) => priceList.active !== false
       ).length,
-      approved: priceLists.filter(
+      approved: visiblePriceLists.filter(
         (priceList) =>
           priceList.active !== false &&
           priceList.approved_for_pricing === true
       ).length,
-      withPdf: priceLists.filter(
+      withPdf: visiblePriceLists.filter(
         (priceList) => Boolean(priceList.file_path)
       ).length,
     }),
-    [priceLists]
+    [visiblePriceLists]
   );
 
   const filteredVendorInvoices = useMemo(() => {
@@ -4923,6 +4963,8 @@ export default function Home() {
 
   async function signOut() {
     if (!supabase) return;
+    if (dashboardDirty && !window.confirm("Your personal workspace has unsaved changes. Sign out without saving?")) return;
+    setDashboardDirty(false);
 
     await supabase.auth.signOut();
     setProfile(null);
@@ -18477,6 +18519,33 @@ export default function Home() {
             </button>
           </header>
 
+          {["dashboard", "clients", "quotes", "sales", "purchase_orders"].includes(view) && (
+            <section className="record-scope-bar" aria-label="Record access">
+              <div>
+                <strong>{recordScope === "mine" ? "My Records" : "All Access"}</strong>
+                <p>{recordScope === "mine"
+                  ? "Your assigned clients, quotes, sales orders and purchase orders."
+                  : "Browse team records available to your account."}</p>
+              </div>
+              <div className="record-scope-controls">
+                <div className="record-scope-toggle" role="group" aria-label="Choose record view">
+                  <button type="button" aria-pressed={recordScope === "mine"}
+                    onClick={() => { setRecordScope("mine"); setScopeSalespersonId(""); }}>My Records</button>
+                  <button type="button" aria-pressed={recordScope === "all"}
+                    onClick={() => setRecordScope("all")}>All Access</button>
+                </div>
+                {recordScope === "all" && (
+                  <select aria-label="Filter records by salesperson" value={scopeSalespersonId}
+                    onChange={(event) => setScopeSalespersonId(event.target.value)}>
+                    <option value="">All users</option>
+                    <option value="__unassigned__">Unassigned</option>
+                    {team.map((person) => <option key={person.id} value={person.id}>{person.display_name}</option>)}
+                  </select>
+                )}
+              </div>
+            </section>
+          )}
+
           {message && (
             <div className="notice">
               <span>{message}</span>
@@ -20618,7 +20687,7 @@ export default function Home() {
 
                 <button
                   className="page-primary"
-                  onClick={openNewCatalog}
+                  onClick={() => { setShowArchivedCatalogs(false); setCatalogSearch(""); openNewCatalog(); }}
                 >
                   + New Catalog
                 </button>
@@ -20626,12 +20695,12 @@ export default function Home() {
 
               <div className="library-stat-grid">
                 <MiniStat
-                  label="CATALOGS"
+                  label={showArchivedCatalogs ? "ARCHIVED CATALOGS" : "ACTIVE CATALOGS"}
                   value={catalogStats.total.toString()}
                 />
                 <MiniStat
-                  label="ACTIVE"
-                  value={catalogStats.active.toString()}
+                  label="TOTAL STORED"
+                  value={catalogs.length.toString()}
                 />
                 <MiniStat
                   label="WITH PDF"
@@ -20641,6 +20710,20 @@ export default function Home() {
                   label="MANUFACTURERS"
                   value={catalogStats.manufacturers.toString()}
                 />
+              </div>
+
+              <div className="library-archive-controls">
+                <div className="record-scope-toggle" role="group" aria-label="Catalogs view">
+                  <button type="button" aria-pressed={!showArchivedCatalogs} onClick={() => setShowArchivedCatalogs(false)}>
+                    Active ({catalogs.filter(item => item.active !== false).length})
+                  </button>
+                  <button type="button" aria-pressed={showArchivedCatalogs} onClick={() => setShowArchivedCatalogs(true)}>
+                    Archive ({catalogs.filter(item => item.active === false).length})
+                  </button>
+                </div>
+                <p>{showArchivedCatalogs
+                  ? "Inactive catalogs are kept here. Open a record and turn Active back on to restore it."
+                  : "Showing active catalogs only. Switching a record to inactive moves it to the Archive."}</p>
               </div>
 
               <div className="search-card">
@@ -20671,10 +20754,11 @@ export default function Home() {
                 ) : filteredCatalogs.length === 0 ? (
                   <div className="empty-state">
                     <div className="empty-icon">◇</div>
-                    <strong>No catalogs yet</strong>
+                    <strong>{catalogSearch.trim() ? "No matching catalogs" : showArchivedCatalogs ? "No archived catalogs" : "No active catalogs"}</strong>
                     <span>
-                      Add a manufacturer catalog, then upload the
-                      PDF and build its searchable product records.
+                      {catalogSearch.trim() ? "Try another search in this view."
+                        : showArchivedCatalogs ? "Records appear here when you switch them to inactive."
+                        : "Add a new record, or open the Archive to restore an inactive one."}
                     </span>
                   </div>
                 ) : (
@@ -20724,14 +20808,14 @@ export default function Home() {
                         <div>
                           <span
                             className={`library-active-badge ${
-                              catalog.active
+                              catalog.active !== false
                                 ? "active"
                                 : "inactive"
                             }`}
                           >
-                            {catalog.active
+                            {catalog.active !== false
                               ? "Active"
-                              : "Inactive"}
+                              : "Archived"}
                           </span>
                         </div>
                         <div>
@@ -20773,7 +20857,7 @@ export default function Home() {
 
                 <button
                   className="page-primary"
-                  onClick={openNewPriceList}
+                  onClick={() => { setShowArchivedPriceLists(false); setPriceListSearch(""); openNewPriceList(); }}
                 >
                   + New Price List
                 </button>
@@ -20781,12 +20865,12 @@ export default function Home() {
 
               <div className="library-stat-grid">
                 <MiniStat
-                  label="PRICE LISTS"
+                  label={showArchivedPriceLists ? "ARCHIVED PRICE LISTS" : "ACTIVE PRICE LISTS"}
                   value={priceListStats.total.toString()}
                 />
                 <MiniStat
-                  label="ACTIVE"
-                  value={priceListStats.active.toString()}
+                  label="TOTAL STORED"
+                  value={priceLists.length.toString()}
                 />
                 <MiniStat
                   label="APPROVED"
@@ -20796,6 +20880,20 @@ export default function Home() {
                   label="WITH PDF"
                   value={priceListStats.withPdf.toString()}
                 />
+              </div>
+
+              <div className="library-archive-controls">
+                <div className="record-scope-toggle" role="group" aria-label="Price Lists view">
+                  <button type="button" aria-pressed={!showArchivedPriceLists} onClick={() => setShowArchivedPriceLists(false)}>
+                    Active ({priceLists.filter(item => item.active !== false).length})
+                  </button>
+                  <button type="button" aria-pressed={showArchivedPriceLists} onClick={() => setShowArchivedPriceLists(true)}>
+                    Archive ({priceLists.filter(item => item.active === false).length})
+                  </button>
+                </div>
+                <p>{showArchivedPriceLists
+                  ? "Inactive price lists are kept here. Open a record and turn Active back on to restore it."
+                  : "Showing active price lists only. Switching a record to inactive moves it to the Archive."}</p>
               </div>
 
               <div className="search-card">
@@ -20828,10 +20926,11 @@ export default function Home() {
                 ) : filteredPriceLists.length === 0 ? (
                   <div className="empty-state">
                     <div className="empty-icon">$</div>
-                    <strong>No price lists yet</strong>
+                    <strong>{priceListSearch.trim() ? "No matching price lists" : showArchivedPriceLists ? "No archived price lists" : "No active price lists"}</strong>
                     <span>
-                      Add a manufacturer price list, upload its PDF,
-                      then create the structured SKU and grade prices.
+                      {priceListSearch.trim() ? "Try another search in this view."
+                        : showArchivedPriceLists ? "Records appear here when you switch them to inactive."
+                        : "Add a new record, or open the Archive to restore an inactive one."}
                     </span>
                   </div>
                 ) : (
@@ -20856,11 +20955,9 @@ export default function Home() {
                         <div className="library-row-primary">
                           <strong>{priceList.title}</strong>
                           <span>
-                            {priceList.expiration_date
-                              ? `Expires ${priceList.expiration_date}`
-                              : priceList.active
-                              ? "No expiration entered"
-                              : "Inactive"}
+                            {priceList.active === false ? "Archived"
+                              : priceList.expiration_date ? `Expires ${priceList.expiration_date}`
+                              : "No expiration entered"}
                           </span>
                         </div>
                         <div>
@@ -20877,14 +20974,13 @@ export default function Home() {
                         <div>
                           <span
                             className={`pricing-authority-badge ${
-                              priceList.approved_for_pricing
+                              priceList.active !== false && priceList.approved_for_pricing
                                 ? "approved"
                                 : "not-approved"
                             }`}
                           >
-                            {priceList.approved_for_pricing
-                              ? "Approved"
-                              : "Not Approved"}
+                            {priceList.active === false ? "Inactive"
+                              : priceList.approved_for_pricing ? "Approved" : "Not Approved"}
                           </span>
                         </div>
                         <div>
@@ -20916,150 +21012,27 @@ export default function Home() {
           )}
 
 
-          {view === "dashboard" && (
-            <section>
-              <div className="welcome-card">
-                <div>
-                  <div className="welcome-role">
-                    {profile?.role || "Team Member"}
-                  </div>
-
-                  <h1>Welcome back, {firstName}.</h1>
-
-                  <p>
-                    The Hub is connected and your client directory is
-                    officially live.
-                  </p>
-                </div>
-
-                <button
-                  className="welcome-action"
-                  onClick={() => setView("clients")}
-                >
-                  Open Clients →
-                </button>
-              </div>
-
-              <div className="stats-grid">
-                <StatCard
-                  label="CLIENTS"
-                  value={
-                    clientsLoading
-                      ? "..."
-                      : clientStats.total.toLocaleString()
-                  }
-                  detail="Live client records"
-                />
-
-                <StatCard
-                  label="WITH EMAIL"
-                  value={clientStats.withEmail.toLocaleString()}
-                  detail="Ready for communication"
-                />
-
-                <StatCard
-                  label="WITH PHONE"
-                  value={clientStats.withPhone.toLocaleString()}
-                  detail="Phone contacts"
-                />
-
-                <StatCard
-                  label="STATES"
-                  value={clientStats.states.toLocaleString()}
-                  detail="Client locations"
-                />
-              </div>
-
-              <div className="dashboard-grid">
-                <section className="panel">
-                  <div className="panel-header">
-                    <div>
-                      <div className="panel-eyebrow">
-                        CLIENT DIRECTORY
-                      </div>
-                      <h2>Quick access</h2>
-                    </div>
-
-                    <button
-                      className="text-button"
-                      onClick={() => setView("clients")}
-                    >
-                      View all
-                    </button>
-                  </div>
-
-                  {clientsLoading ? (
-                    <div className="empty-state">
-                      Loading clients...
-                    </div>
-                  ) : (
-                    <div className="quick-client-list">
-                      {clients.slice(0, 6).map((client) => (
-                        <button
-                          key={client.id}
-                          className="quick-client-row"
-                          onClick={() => {
-                            setView("clients");
-                            openClient(client);
-                          }}
-                        >
-                          <div className="client-initial">
-                            {getClientName(client)
-                              .charAt(0)
-                              .toUpperCase()}
-                          </div>
-
-                          <div className="quick-client-copy">
-                            <strong>{getClientName(client)}</strong>
-                            <span>
-                              {getLocation(client) ||
-                                client.email ||
-                                "No location entered"}
-                            </span>
-                          </div>
-
-                          <span className="chevron">›</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                <section className="panel system-panel">
-                  <div className="panel-eyebrow">SYSTEM</div>
-                  <h2>Hub status</h2>
-
-                  <StatusRow
-                    label="Vercel production app"
-                    value="Connected"
-                  />
-                  <StatusRow
-                    label="Supabase authentication"
-                    value="Connected"
-                  />
-                  <StatusRow
-                    label="Employee profile"
-                    value={profile?.role || "Connected"}
-                  />
-                  <StatusRow
-                    label="Client database"
-                    value={`${clientStats.total} loaded`}
-                  />
-
-                  <div className="commission-box">
-                    <span>Your default commission</span>
-                    <strong>
-                      {(
-                        (profile?.default_commission_rate || 0.02) *
-                        100
-                      ).toFixed(0)}
-                      %
-                    </strong>
-                  </div>
-                </section>
-              </div>
-            </section>
-          )}
+          <div hidden={view !== "dashboard"}>
+            <SalesDashboard
+              key={session.user.id}
+              userId={session.user.id}
+              firstName={firstName}
+              onDirtyChange={setDashboardDirty}
+              supabase={supabase}
+              scopeLabel={recordScope === "mine" ? "My clients & quotes" : scopeSalespersonId === "__unassigned__" ? "Unassigned clients & quotes" : scopeSalespersonId ? `${salespersonName(scopeSalespersonId)} · clients & quotes` : "All clients & quotes"}
+              loading={clientsLoading || quotesLoading}
+              clients={scopedClients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              allClients={clients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              quotes={scopedQuotes}
+              onClient={id => { const client = clients.find(item => item.id === id); if (client) { setView("clients"); void openClient(client); } }}
+              onQuote={id => { const quote = quotes.find(item => item.id === id); if (quote) { setView("quotes"); void openQuote(quote); } }}
+              onNewClient={() => { setView("clients"); openNewClient(); }}
+              onNewQuote={() => { setView("quotes"); openNewQuote(); }}
+              onScan={() => setView("scan")}
+              onClients={() => setView("clients")}
+              onQuotes={() => setView("quotes")}
+            />
+          </div>
 
           {view === "scan" && (
             <section>
@@ -32166,6 +32139,18 @@ function FormField({
 }
 
 const appCss = `
+  .library-archive-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; margin: 18px 0; }
+  .library-archive-controls p { flex: 1; min-width: 220px; margin: 0; font-size: 12px; line-height: 1.6; color: #526579; }
+
+  .record-scope-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 20px 0; padding: 16px 20px; background: #fff; border: 1px solid #dce4ee; border-radius: 12px; color: #152c47; }
+  .record-scope-bar p { margin: 5px 0 0; font-size: 12px; color: #526579; }
+  .record-scope-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .record-scope-toggle { display: flex; gap: 4px; padding: 4px; background: #edf2f8; border-radius: 9px; }
+  .record-scope-toggle button { padding: 9px 13px; border: 0; border-radius: 6px; background: transparent; color: #233d5a; cursor: pointer; font-weight: 600; }
+  .record-scope-toggle button[aria-pressed="true"] { background: #174b83; color: #fff; }
+  .record-scope-controls select { max-width: 240px; padding: 10px; border: 1px solid #c8d4e2; border-radius: 8px; background: #fff; color: #152c47; }
+  @media (max-width: 700px) { .record-scope-bar { align-items: flex-start; flex-direction: column; } }
+
   * { box-sizing: border-box; }
 
   body {

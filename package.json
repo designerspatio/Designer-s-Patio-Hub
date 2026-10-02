@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run build"
+    "check": "npm run typecheck && npm run build",
+    "test:crm": "node tests/crm-workspace.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
