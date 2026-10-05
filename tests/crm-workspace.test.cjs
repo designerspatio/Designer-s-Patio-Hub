@@ -73,6 +73,25 @@ test('simultaneous saves cannot overwrite each other', async()=> {
   const responses=await Promise.all([route.PUT(req('user-a',{...state(),note:'tab 1'})),route.PUT(req('user-a',{...state(),note:'tab 2'}))]);
   assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]); assert.equal(files.size,1);
 });
+test('legacy server key setting supports saving and reloading without weakening authentication', async()=> {
+  const {route,req}=backend();
+  const canonical=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const legacy=process.env.SUBABASE_SERVICE_ROLE_KEY;
+  try {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUBABASE_SERVICE_ROLE_KEY='test-service';
+    assert.equal((await route.GET(req('invalid'))).status,401);
+    assert.equal((await route.PUT(req('user-a',state()))).status,200);
+    const loaded=await (await route.GET(req('user-a'))).json();
+    assert.equal(loaded.workspace.note,'Client talking points');
+    delete process.env.SUBABASE_SERVICE_ROLE_KEY;
+    assert.equal((await route.GET(req('user-a'))).status,503);
+  } finally {
+    process.env.SUPABASE_SERVICE_ROLE_KEY=canonical;
+    if (legacy === undefined) delete process.env.SUBABASE_SERVICE_ROLE_KEY;
+    else process.env.SUBABASE_SERVICE_ROLE_KEY=legacy;
+  }
+});
 test('storage failures and public bucket misconfiguration never appear as empty or successful saves',async()=> {
   const a=backend(); a.setFailure(); assert.equal((await a.route.GET(a.req('user-a'))).status,503);
   const b=backend(); b.setPublic(); assert.equal((await b.route.PUT(b.req('user-a',state()))).status,503); assert.equal(b.files.size,0);

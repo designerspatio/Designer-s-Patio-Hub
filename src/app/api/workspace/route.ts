@@ -18,7 +18,8 @@ async function context(request: Request) {
   if (!token) throw new HttpError("Please sign in again.", 401);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Support the legacy Vercel setting; sensitive variables cannot be renamed in place.
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUBABASE_SERVICE_ROLE_KEY;
   if (!url || !key || !serviceKey) throw new HttpError("Personal workspace saving is not configured. Ask your Hub administrator to check the server's Supabase settings.", 503);
   const auth = createClient(url, key, options);
   const { data: { user }, error } = await auth.auth.getUser(token);
