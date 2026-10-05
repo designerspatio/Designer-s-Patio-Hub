@@ -2,6 +2,7 @@
 
 import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
+import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
 import { matchesRecordScope, type RecordScope } from "./recordScope";
 import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
 import {
@@ -2305,6 +2306,7 @@ export default function Home() {
     return url && key ? createClient(url, key) : null;
   }, []);
 
+  const [clientArchiveView, setClientArchiveView] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [dashboardDirty, setDashboardDirty] = useState(false);
@@ -3017,20 +3019,13 @@ export default function Home() {
 
     setClientsLoading(true);
 
-    const { data, error } = await supabase
-      .from("clients")
-      .select(clientColumns)
-      .order("client_name", { ascending: true })
-      .limit(1000);
-
-    if (error) {
-      setMessage(`Client error: ${error.message}`);
+    try {
+      setClients((await fetchAllClients(supabase) as unknown as Client[]).sort((a,b) => (a.client_name || "").localeCompare(b.client_name || "")));
+    } catch (error) {
+      setMessage(`Client error: ${error instanceof Error ? error.message : "Unable to load clients"}`);
+    } finally {
       setClientsLoading(false);
-      return;
     }
-
-    setClients((data || []) as Client[]);
-    setClientsLoading(false);
   }, [supabase, session?.user?.id]);
 
   const loadManufacturers = useCallback(async () => {
@@ -4137,7 +4132,7 @@ export default function Home() {
   // Keep the full fetched arrays for relationships and editing. Scope only
   // directory views and their totals; Supabase remains the access authority.
   const scopedClients = useMemo(() => clients.filter((client) =>
-    matchesRecordScope(client.assigned_user_id, recordScope, session?.user?.id, scopeSalespersonId)
+    (client.active !== false) && matchesRecordScope(client.assigned_user_id, recordScope, session?.user?.id, scopeSalespersonId)
   ), [clients, recordScope, session?.user?.id, scopeSalespersonId]);
   const scopedQuotes = useMemo(() => quotes.filter((quote) =>
     matchesRecordScope(quote.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
@@ -4155,9 +4150,10 @@ export default function Home() {
   const filteredClients = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    if (!term) return scopedClients;
+    const directoryClients = clientArchiveView ? clients.filter(client => client.active === false && matchesRecordScope(client.assigned_user_id, recordScope, session?.user?.id, scopeSalespersonId)) : scopedClients;
+    if (!term) return directoryClients;
 
-    return scopedClients.filter((client) => {
+    return directoryClients.filter((client) => {
       const salesperson =
         team.find((person) => person.id === client.assigned_user_id)
           ?.display_name || "";
@@ -4178,7 +4174,7 @@ export default function Home() {
 
       return searchable.includes(term);
     });
-  }, [scopedClients, search, team]);
+  }, [scopedClients, clients, clientArchiveView, recordScope, scopeSalespersonId, session?.user?.id, search, team]);
 
   const filteredAdminTeam = useMemo(() => {
     const term =
@@ -21022,7 +21018,7 @@ export default function Home() {
               scopeLabel={recordScope === "mine" ? "My clients & quotes" : scopeSalespersonId === "__unassigned__" ? "Unassigned clients & quotes" : scopeSalespersonId ? `${salespersonName(scopeSalespersonId)} · clients & quotes` : "All clients & quotes"}
               loading={clientsLoading || quotesLoading}
               clients={scopedClients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
-              allClients={clients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              allClients={clients.filter(client => client.active !== false).map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
               quotes={scopedQuotes}
               onClient={id => { const client = clients.find(item => item.id === id); if (client) { setView("clients"); void openClient(client); } }}
               onQuote={id => { const quote = quotes.find(item => item.id === id); if (quote) { setView("quotes"); void openQuote(quote); } }}
@@ -21185,6 +21181,13 @@ export default function Home() {
                   + New Client
                 </button>
               </div>
+
+              {supabase && session && <ClientCsvPanel supabase={supabase} userId={session.user.id}
+                visibleClients={filteredClients as unknown as import("./clientCsv").CsvClient[]} onComplete={loadClients} />}
+              <label className="client-archive-filter">Show <select value={clientArchiveView ? "archived" : "active"} onChange={e=>setClientArchiveView(e.target.value === "archived")}>
+                <option value="active">Active Clients</option><option value="archived">Archived Clients</option>
+              </select></label>
+              {clientArchiveView && <p>Archived clients retain their order history. Open a client, choose Edit, and Save to reactivate.</p>}
 
               <div className="search-card">
                 <div className="search-icon">⌕</div>
@@ -24159,7 +24162,7 @@ export default function Home() {
                       }
                     >
                       <option value="">Choose client...</option>
-                      {clients.map((client) => (
+                      {clients.filter((client) => client.active !== false || client.id === quoteForm.client_id).map((client) => (
                         <option key={client.id} value={client.id}>
                           {getClientName(client)}
                         </option>

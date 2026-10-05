@@ -8,3 +8,17 @@
 .hero h1{margin:0;font-size:28px}.hero p{color:#dce9f2}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:18px}.card{background:#fff;border:1px solid #dfe7ec;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(22,48,70,.05)}
 .card small{color:#6f7c86;font-weight:700}.card strong{display:block;color:#173a59;font-size:24px;margin-top:5px}
 @media(max-width:900px){.shell{grid-template-columns:80px 1fr}.brand span,.brand small,.group label,.nav span{display:none}.nav{text-align:center}.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:600px){.main{padding:14px}.grid{grid-template-columns:1fr}}
+/* Client CSV import and export */
+.client-csv-tools { margin: 0 0 20px; }
+.client-csv-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.client-csv-actions > span { color:#64748b; font-size:13px; }
+.client-csv-panel { margin-top:16px; padding:24px; border:1px solid #d5deea; border-radius:14px; background:white; }
+.client-csv-panel h2 { margin:0 0 12px; color:#203c62; }
+.client-csv-panel p { line-height:1.6; }
+.client-csv-panel label { display:flex; flex-direction:column; gap:7px; margin:16px 0; font-weight:600; }
+.client-csv-panel select,.client-csv-panel textarea,.client-archive-filter select { padding:10px; border:1px solid #bdcbdd; border-radius:7px; max-width:500px; font:inherit; }
+.client-csv-preview { overflow-x:auto; margin-top:20px; padding-top:16px; border-top:1px solid #d5deea; }
+.client-csv-preview table { width:100%; border-collapse:collapse; font-size:13px; }
+.client-csv-preview th,.client-csv-preview td { padding:10px; border-bottom:1px solid #e2e8f0; text-align:left; }
+.client-csv-panel .client-csv-confirm { flex-direction:row; align-items:center; }
+.client-archive-filter { display:flex; align-items:center; gap:10px; margin:0 0 16px; }
