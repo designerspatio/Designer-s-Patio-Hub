@@ -22,3 +22,16 @@
 .client-csv-preview th,.client-csv-preview td { padding:10px; border-bottom:1px solid #e2e8f0; text-align:left; }
 .client-csv-panel .client-csv-confirm { flex-direction:row; align-items:center; }
 .client-archive-filter { display:flex; align-items:center; gap:10px; margin:0 0 16px; }
+.expense-csv { margin: 20px 0; padding: 20px; border: 1px solid #d8dfe8; border-radius: 12px; background: #fff; color: #17263c; }
+.expense-csv h2 { margin: 20px 0 8px; }
+.expense-csv p { line-height: 1.5; }
+.expense-csv fieldset { border: 1px solid #d8dfe8; border-radius: 8px; margin: 16px 0; padding: 16px; }
+.expense-csv-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 14px; }
+.expense-csv-fields label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+.expense-csv input:not([type=checkbox]), .expense-csv select { padding: 10px; border: 1px solid #b5c0cf; border-radius: 6px; max-width: 100%; }
+.expense-csv button { margin: 8px 8px 8px 0; padding: 10px 16px; cursor: pointer; }
+.expense-csv button:disabled { opacity: .5; cursor: default; }
+.expense-csv-table { overflow: auto; max-height: 480px; margin: 12px 0; }
+.expense-csv table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.expense-csv th, .expense-csv td { padding: 10px; text-align: left; border-bottom: 1px solid #e0e5ec; }
+.expense-csv th { position: sticky; top: 0; background: #eef2f7; }

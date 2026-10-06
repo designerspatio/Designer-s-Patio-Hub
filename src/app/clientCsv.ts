@@ -4,7 +4,7 @@ export type ClientCsvRow = { [key: string]: string | boolean | null };
 export type ParsedClients = { rows: ClientCsvRow[]; duplicates: number; blanks: number; recoveredNames: number };
 const aliases: Record<string,string> = { clientname:'client_name', name:'client_name', client:'client_name', city:'city', state:'state', zip:'zip_code', zipcode:'zip_code', postalcode:'zip_code', phone:'phone', phonenumber:'phone', email:'email', emailaddress:'email', address:'street_address', streetaddress:'street_address', firstname:'first_name', lastname:'last_name', company:'company_name', companyname:'company_name', businesstype:'business_type', leadstatus:'lead_status', notes:'notes', taxexempt:'tax_exempt', assigneduserid:'assigned_user_id', clientid:'id', id:'id' };
 export const clientNameKey = (value: unknown) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g,'');
-function csvTable(source: string): string[][] {
+export function csvTable(source: string): string[][] {
   const rows: string[][]=[];let row: string[]=[],cell='',quoted=false,closed=false;
   source=source.replace(/^\uFEFF/,'');
   for(let i=0;i<source.length;i++) {

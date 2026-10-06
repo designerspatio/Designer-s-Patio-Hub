@@ -1,5 +1,7 @@
 "use client";
 
+import ExpenseCsvPanel from "./ExpenseCsvPanel";
+
 import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
@@ -19348,6 +19350,10 @@ export default function Home() {
                   <span>QB</span>
                 </button>
               </div>
+
+              {accountingSection === "expenses" && supabase && profile?.id && (
+                <ExpenseCsvPanel supabase={supabase} userId={profile.id} onComplete={loadAccounting} />
+              )}
 
               {accountingSection === "quickbooks" && (
                 <section className="qbo-setup-shell">
