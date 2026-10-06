@@ -1,5 +1,8 @@
 "use client";
 
+import OrderChargesEditor from "./OrderChargesEditor";
+import { displayOrderNotes, calculateOrderCharges, plainOrderNotes, readChargeSettings, writeChargeSettings, validateChargeSettings } from "./orderCharges";
+
 import ExpenseCsvPanel from "./ExpenseCsvPanel";
 
 import { createClient, type Session } from "@supabase/supabase-js";
@@ -6610,7 +6613,7 @@ export default function Home() {
   ) {
     setQuoteForm((current) => ({
       ...current,
-      [field]: value,
+      [field]: field === "notes" && readChargeSettings(current.notes) ? writeChargeSettings(String(value), readChargeSettings(current.notes)!) : value,
     }));
   }
 
@@ -6794,7 +6797,8 @@ export default function Home() {
     const adjustment = numberOrZero(
       quoteForm.adjustment_amount
     );
-    const total = merchandise + freight + adjustment;
+    const charges = calculateOrderCharges(quoteForm.notes, merchandise, freight, adjustment);
+    const total = charges.total;
     const marginDollar = merchandise - expectedCost;
     const marginPct =
       merchandise > 0
@@ -6805,12 +6809,13 @@ export default function Home() {
       merchandise,
       expectedCost,
       freight,
-      adjustment,
+      adjustment: charges.additional,
+      tax: charges.tax,
       total,
       marginDollar,
       marginPct,
     };
-  }, [quoteItems, quoteForm.freight_amount, quoteForm.adjustment_amount]);
+  }, [quoteItems, quoteForm.freight_amount, quoteForm.adjustment_amount, quoteForm.notes]);
 
   function pdfEscape(value: string) {
     return value
@@ -7361,14 +7366,20 @@ export default function Home() {
       cursorTop += 18;
     }
 
-    if (quoteForm.notes.trim()) {
-      textAt(MARGIN, cursorTop, "QUOTE NOTES", 8.2, true, NAVY);
-      const noteLines = wrapPdfWidth(quoteForm.notes, 300, 7.1);
-      noteLines.slice(0, 5).forEach((entry, index) =>
-        textAt(MARGIN, cursorTop + 14 + index * 9, entry, 7.1, false, DARK)
-      );
-      cursorTop += 22 + Math.min(5, noteLines.length) * 9;
+    const printableNotes = displayOrderNotes(quoteForm.notes);
+    if (printableNotes.trim()) {
+      textAt(MARGIN, cursorTop, "QUOTE NOTES & CHARGES", 8.2, true, NAVY);
+      cursorTop += 14;
+      for (const paragraph of printableNotes.split("\n")) {
+        for (const entry of wrapPdfWidth(paragraph, PAGE_W - MARGIN * 2, 7.1)) {
+          if (cursorTop > 690) { newPage(true); cursorTop = 66; }
+          textAt(MARGIN, cursorTop, entry, 7.1, false, DARK);
+          cursorTop += 10;
+        }
+      }
+      cursorTop += 14;
     }
+    if (cursorTop > 400) { newPage(true); cursorTop = 66; }
 
     const summaryTop = cursorTop;
     const termsX = MARGIN;
@@ -7409,15 +7420,10 @@ export default function Home() {
       quoteEditorTotals.freight > 0 ? money(quoteEditorTotals.freight) : "To Be Determined",
       summaryTop + 35
     );
-    if (quoteEditorTotals.adjustment !== 0) {
-      rowText("ADJUSTMENT", money(quoteEditorTotals.adjustment), summaryTop + 56);
-      rowText("SALES TAX", "To Be Determined", summaryTop + 75);
-    } else {
-      rowText("SALES TAX", "To Be Determined", summaryTop + 56);
-    }
+    rowText("ADDITIONAL CHARGES", money(quoteEditorTotals.adjustment), summaryTop + 56);
+    rowText(readChargeSettings(quoteForm.notes)?.status === "Tax exempt" ? "TAX EXEMPT" : "SALES TAX", money(quoteEditorTotals.tax), summaryTop + 75);
     lineAt(totalsX + 10, summaryTop + 82, totalsX + totalsW - 10, summaryTop + 82, 0.6, [0.65, 0.7, 0.74]);
-    rowText("GRAND TOTAL*", money(quoteEditorTotals.total), summaryTop + 92, true);
-    textAt(totalsX + 12, summaryTop + 107, "*Freight and applicable tax may be added.", 5.6, false, MID);
+    rowText("GRAND TOTAL", money(quoteEditorTotals.total), summaryTop + 92, true);
 
     const sigTop = summaryTop + 138;
     textAt(totalsX, sigTop, "SIGNATURE / ACCEPTANCE", 8.8, true, NAVY);
@@ -7943,14 +7949,20 @@ export default function Home() {
       cursorTop += 18;
     }
 
-    if (salesPdfForm.notes.trim()) {
-      textAt(MARGIN, cursorTop, "ORDER NOTES", 8.2, true, NAVY);
-      const noteLines = wrapPdfWidth(salesPdfForm.notes, 300, 7.1);
-      noteLines.slice(0, 5).forEach((entry, index) =>
-        textAt(MARGIN, cursorTop + 14 + index * 9, entry, 7.1, false, DARK)
-      );
-      cursorTop += 22 + Math.min(5, noteLines.length) * 9;
+    const printableNotes = displayOrderNotes(salesPdfForm.notes) + (vendorFreight.length ? "\n" + vendorFreight.map(row => `Freight - ${manufacturers.find(m=>m.id===row.manufacturer_id)?.name || "Vendor"}: ${money(numberOrZero(row.amount))}`).join("\n") : "");
+    if (printableNotes.trim()) {
+      textAt(MARGIN, cursorTop, "ORDER NOTES & CHARGES", 8.2, true, NAVY);
+      cursorTop += 14;
+      for (const paragraph of printableNotes.split("\n")) {
+        for (const entry of wrapPdfWidth(paragraph, PAGE_W - MARGIN * 2, 7.1)) {
+          if (cursorTop > 690) { newPage(true); cursorTop = 66; }
+          textAt(MARGIN, cursorTop, entry, 7.1, false, DARK);
+          cursorTop += 10;
+        }
+      }
+      cursorTop += 14;
     }
+    if (cursorTop > 400) { newPage(true); cursorTop = 66; }
 
     const summaryTop = cursorTop;
     const termsX = MARGIN;
@@ -7987,7 +7999,7 @@ export default function Home() {
 
     rowText("MERCHANDISE", money(salesPdfTotals.merchandise), summaryTop + 14);
     rowText("FREIGHT", money(salesPdfTotals.freight), summaryTop + 34);
-    rowText("ADJUSTMENT", money(salesPdfTotals.adjustment), summaryTop + 54);
+    rowText("ADDITIONAL CHARGES", money(salesPdfTotals.adjustment), summaryTop + 54);
     rowText("SALES TAX", money(salesPdfTotals.tax), summaryTop + 74);
     lineAt(totalsX + 10, summaryTop + 91, totalsX + totalsW - 10, summaryTop + 91, 0.6, [0.65, 0.7, 0.74]);
     rowText("ORDER TOTAL", money(salesPdfTotals.total), summaryTop + 102, true);
@@ -8213,6 +8225,8 @@ export default function Home() {
 
   async function saveQuote() {
     if (!supabase) return;
+    const chargeError = validateChargeSettings(quoteForm.notes);
+    if (chargeError) { setMessage(chargeError); return; }
 
     if (!quoteForm.client_id) {
       setMessage("Choose a client before saving the quote.");
@@ -8242,9 +8256,7 @@ export default function Home() {
       freight_amount: numberOrZero(
         quoteForm.freight_amount
       ),
-      adjustment_amount: numberOrZero(
-        quoteForm.adjustment_amount
-      ),
+      adjustment_amount: quoteEditorTotals.adjustment + quoteEditorTotals.tax,
       updated_at: new Date().toISOString(),
     };
 
@@ -8839,6 +8851,8 @@ export default function Home() {
   }
 
   async function convertQuoteToSale() {
+    const chargeError = validateChargeSettings(quoteForm.notes);
+    if (chargeError) { setMessage(chargeError); return; }
     if (!supabase || !selectedQuote) {
       setMessage("Save the quote before converting it to a sale.");
       return;
@@ -8915,10 +8929,8 @@ export default function Home() {
         ship_to_zip: quoteForm.ship_to_zip.trim() || null,
         delivery_notes: quoteForm.delivery_notes.trim() || null,
         freight_amount: numberOrZero(quoteForm.freight_amount),
-        adjustment_amount: numberOrZero(
-          quoteForm.adjustment_amount
-        ),
-        tax_amount: 0,
+        adjustment_amount: quoteEditorTotals.adjustment,
+        tax_amount: quoteEditorTotals.tax,
         updated_at: new Date().toISOString(),
       })
       .select(salesOrderColumns)
@@ -9278,7 +9290,7 @@ export default function Home() {
     value: string
   ) {
     setSaleEditForm((current) =>
-      current ? { ...current, [field]: value } : current
+      current ? { ...current, [field]: field === "notes" && readChargeSettings(current.notes) ? writeChargeSettings(value, readChargeSettings(current.notes)!) : value } : current
     );
   }
 
@@ -9484,6 +9496,11 @@ export default function Home() {
 
   async function saveSaleEdits() {
     if (!supabase || !selectedSale || !saleEditForm) return;
+    const chargeError = validateChargeSettings(saleEditForm.notes);
+    if (chargeError) { setMessage(chargeError); return; }
+    const chargeTotals = calculateOrderCharges(saleEditForm.notes,
+      saleEditItems.reduce((sum,item)=>sum+numberOrZero(item.quantity)*numberOrZero(item.unit_price),0),
+      vendorFreightTotal(saleEditVendorFreight), numberOrZero(saleEditForm.adjustment_amount), numberOrZero(saleEditForm.tax_amount));
 
     if (!saleEditForm.client_id) {
       setMessage("A sales order needs a client.");
@@ -9601,10 +9618,8 @@ export default function Home() {
         freight_amount: vendorFreightTotal(
           saleEditVendorFreight
         ),
-        adjustment_amount: numberOrZero(
-          saleEditForm.adjustment_amount
-        ),
-        tax_amount: numberOrZero(saleEditForm.tax_amount),
+        adjustment_amount: chargeTotals.additional,
+        tax_amount: chargeTotals.tax,
         updated_at: new Date().toISOString(),
       })
       .eq("id", selectedSale.id)
@@ -24964,7 +24979,7 @@ export default function Home() {
                   <textarea
                     className="quote-notes"
                     rows={6}
-                    value={quoteForm.notes}
+                    value={plainOrderNotes(quoteForm.notes)}
                     onChange={(e) =>
                       updateQuoteForm(
                         "notes",
@@ -25001,19 +25016,10 @@ export default function Home() {
                     />
                   </div>
 
-                  <div className="summary-input-row">
-                    <label>Adjustment</label>
-                    <input
-                      inputMode="decimal"
-                      value={quoteForm.adjustment_amount}
-                      onChange={(e) =>
-                        updateQuoteForm(
-                          "adjustment_amount",
-                          e.target.value
-                        )
-                      }
-                    />
-                  </div>
+                  <OrderChargesEditor notes={quoteForm.notes} merchandise={quoteEditorTotals.merchandise}
+                    freight={numberOrZero(quoteForm.freight_amount)} adjustment={numberOrZero(quoteForm.adjustment_amount)}
+                    clientExempt={Boolean(clients.find(c=>c.id===quoteForm.client_id)?.tax_exempt)}
+                    onChange={notes=>setQuoteForm(current=>({...current,notes}))} />
 
                   <div className="summary-total">
                     <span>Quote Total</span>
@@ -25109,7 +25115,7 @@ export default function Home() {
                       className="edit-sale-button"
                       onClick={beginSaleEdit}
                     >
-                      Edit Sales Order
+                      Edit Order, Tax & Charges
                     </button>
                   </>
                 )}
@@ -25212,35 +25218,10 @@ export default function Home() {
                     />
                   </FormField>
 
-                  <FormField label="Adjustment">
-                    <input
-                      inputMode="decimal"
-                      value={saleEditForm.adjustment_amount}
-                      onChange={(e) =>
-                        updateSaleEditForm(
-                          "adjustment_amount",
-                          e.target.value
-                        )
-                      }
-                      placeholder="0.00"
-                    />
-                  </FormField>
-
-                  <FormField label="Tax">
-                    <input
-                      inputMode="decimal"
-                      value={saleEditForm.tax_amount}
-                      onChange={(e) =>
-                        updateSaleEditForm("tax_amount", e.target.value)
-                      }
-                      placeholder="0.00"
-                    />
-                  </FormField>
-
                   <FormField label="Notes" wide>
                     <textarea
                       rows={3}
-                      value={saleEditForm.notes}
+                      value={plainOrderNotes(saleEditForm.notes)}
                       onChange={(e) =>
                         updateSaleEditForm("notes", e.target.value)
                       }
@@ -25339,11 +25320,17 @@ export default function Home() {
                   </FormField>
                 </div>
 
+                <OrderChargesEditor notes={saleEditForm.notes}
+                  merchandise={saleEditItems.reduce((sum,item)=>sum+numberOrZero(item.quantity)*numberOrZero(item.unit_price),0)}
+                  freight={vendorFreightTotal(saleEditVendorFreight)} adjustment={numberOrZero(saleEditForm.adjustment_amount)} tax={numberOrZero(saleEditForm.tax_amount)}
+                  clientExempt={Boolean(clients.find(c=>c.id===saleEditForm.client_id)?.tax_exempt)}
+                  onChange={notes=>setSaleEditForm(current=>current?{...current,notes}:current)} />
+
                 <div className="vendor-freight-edit">
                   <div className="sale-edit-section-heading">
                     <div>
                       <div className="detail-kicker">FREIGHT</div>
-                      <strong>Freight by Manufacturer</strong>
+                      <strong>Freight Charges by Vendor</strong>
                     </div>
                     <div className="vendor-freight-total-inline">
                       Total {money(vendorFreightTotal(saleEditVendorFreight))}
@@ -26133,7 +26120,7 @@ export default function Home() {
             </div>
 
             <div className="vendor-freight-view">
-              <div className="quote-card-title">Freight by Manufacturer</div>
+              <div className="quote-card-title">Freight Charges by Vendor</div>
               {vendorFreight.length === 0 ? (
                 <div className="vendor-freight-view-row">
                   <span>General / Unallocated Freight</span>
@@ -26199,6 +26186,7 @@ export default function Home() {
                       )}
                     </strong>
                   </div>
+                  <div><span>Additional charges</span><strong>{money(numberOrZero(selectedSale.adjustment_amount))}</strong></div>
                   <div>
                     <span>Tax</span>
                     <strong>

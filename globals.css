@@ -35,3 +35,9 @@
 .expense-csv table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .expense-csv th, .expense-csv td { padding: 10px; text-align: left; border-bottom: 1px solid #e0e5ec; }
 .expense-csv th { position: sticky; top: 0; background: #eef2f7; }
+.order-charges-editor { margin:16px 0; padding:16px; border:1px solid #d6e0ec; border-radius:10px; background:#f5f8fc; color:#17263c; }
+.order-charge-fields { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:12px 0; }
+.order-charge-fields label { display:flex; flex-direction:column; gap:6px; flex:1; min-width:120px; font-size:13px; }
+.order-charge-fields input:not([type=checkbox]), .order-charge-fields select { width:100%; padding:9px; border:1px solid #b8c5d7; border-radius:6px; background:white; }
+.order-charges-editor button { padding:8px 12px; margin:8px 0; border:1px solid #b8c5d7; border-radius:6px; cursor:pointer; }
+.order-charges-editor p { font-size:13px; line-height:1.5; }
