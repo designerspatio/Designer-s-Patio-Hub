@@ -1,5 +1,6 @@
 "use client";
 
+import ChangePassword from "./ChangePassword";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
 import { displayOrderNotes, calculateOrderCharges, plainOrderNotes, readChargeSettings, writeChargeSettings, validateChargeSettings } from "./orderCharges";
@@ -18546,9 +18547,12 @@ export default function Home() {
               </div>
             </div>
 
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {supabase && <ChangePassword client={supabase} />}
             <button className="signout-button" onClick={signOut}>
               Sign out
             </button>
+            </div>
           </header>
 
           {["dashboard", "clients", "quotes", "sales", "purchase_orders"].includes(view) && (
