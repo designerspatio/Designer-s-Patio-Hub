@@ -46,9 +46,15 @@ function publicSupabase() {
 }
 
 function adminSupabase() {
+  // Older deployments use the misspelled key also supported by Workspace.
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    process.env.SUBABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceKey) {
+    throw new Error("Team management is not configured: the server service-role key is missing.");
+  }
   return createClient(
     env("NEXT_PUBLIC_SUPABASE_URL"),
-    env("SUPABASE_SERVICE_ROLE_KEY"),
+    serviceKey,
     {
       auth: {
         persistSession: false,
