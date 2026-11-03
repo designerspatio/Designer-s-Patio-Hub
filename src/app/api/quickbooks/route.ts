@@ -1,3 +1,4 @@
+import { isManufacturerCharge } from "../../manufacturerCharges";
 import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -1759,7 +1760,7 @@ function buildInvoiceDescription(
 ) {
   return cleanQboText(
     [
-      item.sku ? `SKU ${item.sku}` : "",
+      item.sku && !isManufacturerCharge(item) ? `SKU ${item.sku}` : "",
       item.description || "",
       item.finish
         ? `Finish: ${item.finish}`
@@ -4576,8 +4577,9 @@ export async function POST(
               )
             : null;
 
+        const hasManufacturerCharges = items.some(isManufacturerCharge);
         const adjustmentMapping =
-          adjustmentAmount !== 0
+          (adjustmentAmount !== 0 || hasManufacturerCharges)
             ? await loadQboMapping(
                 connection.id,
                 "sales_item",
@@ -4626,7 +4628,7 @@ export async function POST(
         }
 
         if (
-          adjustmentAmount !== 0 &&
+          (adjustmentAmount !== 0 || hasManufacturerCharges) &&
           !adjustmentMapping
         ) {
           missing.push({
@@ -4698,6 +4700,7 @@ export async function POST(
               )
           )
           .map((item) => {
+            const lineMapping = isManufacturerCharge(item) ? adjustmentMapping : merchandiseMapping;
             const qty = Math.max(
               0,
               Number(
@@ -4724,13 +4727,13 @@ export async function POST(
               SalesItemLineDetail: {
                 ItemRef: {
                   value:
-                    merchandiseMapping!
+                    lineMapping!
                       .qbo_entity_id,
-                  ...(merchandiseMapping
+                  ...(lineMapping
                     ?.qbo_entity_name
                     ? {
                         name:
-                          merchandiseMapping
+                          lineMapping
                             .qbo_entity_name,
                       }
                     : {}),
