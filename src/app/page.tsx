@@ -1,6 +1,7 @@
 "use client";
 
 import OrderChargesEditor from "./OrderChargesEditor";
+import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
 import { displayOrderNotes, calculateOrderCharges, plainOrderNotes, readChargeSettings, writeChargeSettings, validateChargeSettings } from "./orderCharges";
 
 import ExpenseCsvPanel from "./ExpenseCsvPanel";
@@ -2133,30 +2134,18 @@ function calculateQuoteItem(
   item: QuoteItem,
   manufacturer?: Manufacturer
 ): QuoteItem {
+  if (isManufacturerCharge(item)) return item;
   const msrp = numberOrZero(item.msrp_at_grade);
   const discount = numberOrZero(item.discount_pct);
   const factor =
     item.purchasing_factor_snapshot ??
     manufacturer?.purchasing_factor ??
     null;
-  const tariff = numberOrZero(
-    item.tariff_pct_snapshot ??
-      manufacturer?.tariff_pct ??
-      0
-  );
-  const surcharge = numberOrZero(
-    item.surcharge_pct_snapshot ??
-      manufacturer?.surcharge_pct ??
-      0
-  );
-
   const unitPrice = msrp * (1 - discount / 100);
   const expectedCost =
     factor == null
       ? null
-      : msrp *
-        Number(factor) *
-        (1 + tariff / 100 + surcharge / 100);
+      : msrp * Number(factor);
 
   return {
     ...item,
@@ -2268,28 +2257,18 @@ function calculateSaleItem(
   item: SalesOrderItemDraft,
   manufacturer?: Manufacturer
 ): SalesOrderItemDraft {
+  if (isManufacturerCharge(item)) return item;
   const msrp = numberOrZero(item.msrp_at_grade);
   const discount = numberOrZero(item.discount_pct);
   const factor =
     item.purchasing_factor_snapshot ??
     manufacturer?.purchasing_factor ??
     null;
-  const tariff = numberOrZero(
-    item.tariff_pct_snapshot ?? manufacturer?.tariff_pct ?? 0
-  );
-  const surcharge = numberOrZero(
-    item.surcharge_pct_snapshot ??
-      manufacturer?.surcharge_pct ??
-      0
-  );
-
   const unitPrice = msrp * (1 - discount / 100);
   const expectedCost =
     factor == null
       ? null
-      : msrp *
-        Number(factor) *
-        (1 + tariff / 100 + surcharge / 100);
+      : msrp * Number(factor);
 
   return {
     ...item,
@@ -2369,8 +2348,9 @@ export default function Home() {
   const [saleEditMode, setSaleEditMode] = useState(false);
   const [saleEditForm, setSaleEditForm] =
     useState<SalesOrderEditForm | null>(null);
-  const [saleEditItems, setSaleEditItems] =
+  const [rawSaleEditItems, setSaleEditItems] =
     useState<SalesOrderItemDraft[]>([]);
+  const saleEditItems = useMemo(() => syncManufacturerCharges(rawSaleEditItems, manufacturers), [rawSaleEditItems, manufacturers]);
   const [savingSale, setSavingSale] = useState(false);
   const [saleInventorySearches, setSaleInventorySearches] =
     useState<Record<string, string>>({});
@@ -2820,9 +2800,10 @@ export default function Home() {
     freight_amount: "0",
     adjustment_amount: "0",
   });
-  const [quoteItems, setQuoteItems] = useState<QuoteItem[]>([
+  const [rawQuoteItems, setQuoteItems] = useState<QuoteItem[]>([
     blankQuoteItem(0),
   ]);
+  const quoteItems = useMemo(() => syncManufacturerCharges(rawQuoteItems, manufacturers), [rawQuoteItems, manufacturers]);
   const [savingQuote, setSavingQuote] = useState(false);
 
   const [email, setEmail] = useState("");
@@ -7315,7 +7296,7 @@ export default function Home() {
       let cx = col.x + col.image;
       textAt(cx + col.item / 2 - 2, cursorTop + 20, String(index + 1), 8, true, DARK);
       cx += col.item;
-      textAt(cx + 5, cursorTop + 18, item.sku || "-", 7.2, false, DARK);
+      textAt(cx + 5, cursorTop + 18, isManufacturerCharge(item) ? "Charge" : item.sku || "-", 7.2, false, DARK);
       cx += col.sku;
 
       shownDescLines.forEach((entry, lineIndex) => {
@@ -7918,7 +7899,7 @@ export default function Home() {
       let cx = col.x + col.image;
       textAt(cx + col.item / 2 - 2, cursorTop + 20, String(index + 1), 8, true, DARK);
       cx += col.item;
-      textAt(cx + 5, cursorTop + 18, item.sku || "-", 7.2, false, DARK);
+      textAt(cx + 5, cursorTop + 18, isManufacturerCharge(item) ? "Charge" : item.sku || "-", 7.2, false, DARK);
       cx += col.sku;
 
       shownDescLines.forEach((entry, lineIndex) => {
@@ -9528,7 +9509,7 @@ export default function Home() {
     const inventoryLines =
       saleEditItems.filter(
         (item) =>
-          item.fulfillment_method ===
+          !isManufacturerCharge(item) && item.fulfillment_method ===
           "Inventory"
       );
 
@@ -11438,6 +11419,13 @@ export default function Home() {
       (freshItemData || []) as SalesOrderItem[];
 
     setSaleItems(freshItems);
+    const normalizedItems = syncManufacturerCharges(freshItems.map(saleItemToDraft), manufacturers);
+    const pendingCharges = normalizedItems.filter(isManufacturerCharge).some(item => !item.id);
+    if (pendingCharges) {
+      setGeneratingPurchaseOrders(false);
+      window.alert("Edit and save this sales order first to add its automatic tariff and surcharge lines, then generate purchase orders again.");
+      return;
+    }
 
     const specialOrderItems = freshItems.filter(
       (item) => item.fulfillment_method === "Special Order"
@@ -11614,6 +11602,25 @@ export default function Home() {
 
       const existingItems =
         (existingItemsData || []) as PurchaseOrderItem[];
+
+      const saleLineIds = new Set(items.map(item => item.id));
+      const obsoleteCharges = existingItems.filter(item => isManufacturerCharge(item) && !saleLineIds.has(item.sales_order_item_id || ""));
+      if (obsoleteCharges.length) {
+        const { error } = await supabase.from("purchase_order_items").delete().in("id", obsoleteCharges.map(item => item.id));
+        if (error) { setGeneratingPurchaseOrders(false); window.alert(`Could not refresh PO charges: ${error.message}`); return; }
+      }
+      for (const existing of existingItems) {
+        const source = items.find(item => item.id === existing.sales_order_item_id);
+        if (!source) continue;
+        const { error } = await supabase.from("purchase_order_items").update({
+          quantity: Math.max(1, numberOrZero(source.quantity)),
+          unit_cost: numberOrZero(source.expected_unit_cost),
+          sku: source.sku, description: source.description,
+          finish: source.finish, fabric_name: source.fabric_name, grade: source.grade,
+          updated_at: new Date().toISOString(),
+        }).eq("id", existing.id);
+        if (error) { setGeneratingPurchaseOrders(false); window.alert(`Could not refresh PO lines: ${error.message}`); return; }
+      }
 
       const existingSalesItemIds = new Set(
         existingItems
@@ -14504,6 +14511,7 @@ export default function Home() {
               [];
 
             items.forEach((item) => {
+              if (isManufacturerCharge(item)) return;
               const key =
                 item.manufacturer_id ||
                 "__unassigned__";
@@ -24047,8 +24055,8 @@ export default function Home() {
                   <span>
                     Purchasing factor calculates expected vendor cost.
                     Default discount pre-fills the customer discount on
-                    quote lines. Tariff and surcharge are added to
-                    expected cost and can be carried into the quote.
+                    quote lines. Tariffs and surcharges create automatic, non-commissionable
+                    lines based on net selling price for quotes and sales, and base cost for purchase orders.
                   </span>
                 </div>
 
@@ -24420,6 +24428,7 @@ export default function Home() {
 
                 <div className="quote-line-list">
                   {quoteItems.map((item, index) => {
+                    if (isManufacturerCharge(item)) return <article className="quote-line-card" key={item.local_id}><strong>{item.description}</strong><p>Automatic charge · {money(item.unit_price)} · Non-commissionable</p></article>;
                     const manufacturer = manufacturers.find(
                       (manufacturer) =>
                         manufacturer.id === item.manufacturer_id
@@ -24998,9 +25007,11 @@ export default function Home() {
                   <div className="summary-row">
                     <span>Merchandise</span>
                     <strong>
-                      {money(quoteEditorTotals.merchandise)}
+                      {money(quoteEditorTotals.merchandise - quoteItems.filter(isManufacturerCharge).reduce((sum, item) => sum + item.unit_price, 0))}
                     </strong>
                   </div>
+
+                  {quoteItems.filter(isManufacturerCharge).map(item => <div className="summary-row" key={item.local_id}><span>{item.description}</span><strong>{money(item.unit_price)}</strong></div>)}
 
                   <div className="summary-input-row">
                     <label>Freight</label>
@@ -25397,6 +25408,7 @@ export default function Home() {
                   )}
 
                   {saleEditItems.map((item, index) => {
+                    if (isManufacturerCharge(item)) return <article className="sale-edit-item-card" key={item.local_id}><strong>{item.description}</strong><p>Automatic charge · {money(item.unit_price)} · Non-commissionable</p></article>;
                     const extended =
                       numberOrZero(item.quantity) *
                       numberOrZero(item.unit_price);
@@ -26050,7 +26062,7 @@ export default function Home() {
                   <div className="sale-item-row" key={item.id}>
                     <div className="sale-item-copy">
                       <strong>
-                        {item.sku || "No SKU"}
+                        {isManufacturerCharge(item) ? "Automatic charge" : item.sku || "No SKU"}
                         {item.description
                           ? ` • ${item.description}`
                           : ""}
@@ -26174,8 +26186,9 @@ export default function Home() {
                 <div className="sale-total-grid">
                   <div>
                     <span>Merchandise</span>
-                    <strong>{money(merchandise)}</strong>
+                    <strong>{money(merchandise - saleItems.filter(isManufacturerCharge).reduce((sum, item) => sum + numberOrZero(item.unit_price) * numberOrZero(item.quantity), 0))}</strong>
                   </div>
+                  {saleItems.filter(isManufacturerCharge).map(item => <div key={item.id}><span>{item.description}</span><strong>{money(numberOrZero(item.unit_price) * numberOrZero(item.quantity))}</strong></div>)}
                   <div>
                     <span>Freight</span>
                     <strong>
@@ -26908,7 +26921,7 @@ export default function Home() {
                       >
                         <div className="po-item-main">
                           <strong>
-                            {item.sku || "No SKU"}
+                            {isManufacturerCharge(item) ? "Automatic charge" : item.sku || "No SKU"}
                           </strong>
                           <span>
                             {item.description ||
@@ -26977,8 +26990,9 @@ export default function Home() {
                   <div className="po-total-box">
                     <div>
                       <span>Merchandise Cost</span>
-                      <strong>{money(merchandise)}</strong>
+                      <strong>{money(merchandise - purchaseOrderItems.filter(isManufacturerCharge).reduce((sum, item) => sum + numberOrZero(item.quantity) * numberOrZero(item.acknowledged_unit_cost ?? item.unit_cost), 0))}</strong>
                     </div>
+                    {purchaseOrderItems.filter(isManufacturerCharge).map(item => <div key={item.id}><span>{item.description}</span><strong>{money(numberOrZero(item.quantity) * numberOrZero(item.acknowledged_unit_cost ?? item.unit_cost))}</strong></div>)}
                     <div>
                       <span>Vendor Freight</span>
                       <strong>{money(freight)}</strong>
@@ -29398,7 +29412,7 @@ export default function Home() {
                         >
                           <div>
                             <strong>
-                              {item.sku || "No SKU"}
+                              {isManufacturerCharge(item) ? "Automatic charge" : item.sku || "No SKU"}
                             </strong>
                             <span>
                               {item.description || "—"}
