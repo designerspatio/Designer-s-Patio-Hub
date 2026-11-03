@@ -2324,6 +2324,7 @@ export default function Home() {
   const [teamAdminForm, setTeamAdminForm] =
     useState<TeamAdminForm>(blankTeamAdminForm);
   const [teamAdminSaving, setTeamAdminSaving] = useState(false);
+  const [teamAdminMessage, setTeamAdminMessage] = useState("");
   const [teamTemporaryPassword, setTeamTemporaryPassword] =
     useState("");
 
@@ -5171,7 +5172,7 @@ export default function Home() {
     );
     setTeamTemporaryPassword("");
     setTeamAdminModalOpen(true);
-    setMessage("");
+    setTeamAdminMessage("");
   }
 
   function openTeamMember(
@@ -5205,10 +5206,12 @@ export default function Home() {
     });
     setTeamTemporaryPassword("");
     setTeamAdminModalOpen(true);
-    setMessage("");
+    setTeamAdminMessage("");
   }
 
   function closeTeamAdminModal() {
+    if (teamAdminSaving) return;
+    setTeamAdminMessage("");
     setTeamAdminModalOpen(false);
     setSelectedAdminTeamMember(null);
     setTeamAdminMode("new");
@@ -5219,6 +5222,8 @@ export default function Home() {
   }
 
   async function saveTeamMember() {
+    if (teamAdminSaving) return;
+    setTeamAdminMessage("");
     const name =
       teamAdminForm.display_name.trim();
 
@@ -5234,7 +5239,7 @@ export default function Home() {
       );
 
     if (!name) {
-      setMessage(
+      setTeamAdminMessage(
         "Team member name is required."
       );
       return;
@@ -5247,7 +5252,7 @@ export default function Home() {
         !emailValue.includes("@")
       )
     ) {
-      setMessage(
+      setTeamAdminMessage(
         "A valid email is required for a new Hub login."
       );
       return;
@@ -5260,13 +5265,14 @@ export default function Home() {
       commissionPct < 0 ||
       commissionPct > 100
     ) {
-      setMessage(
+      setTeamAdminMessage(
         "Commission must be between 0% and 100%."
       );
       return;
     }
 
     setTeamAdminSaving(true);
+    setTeamAdminMessage("");
 
     try {
       const result = await teamAdminApi(
@@ -5299,11 +5305,15 @@ export default function Home() {
       );
 
       if (!result.ok) {
-        setMessage(
+        setTeamAdminMessage(
           result.payload?.error ||
             "Team member could not be saved."
         );
         return;
+      }
+
+      if (!result.payload?.user?.id) {
+        throw new Error("The server did not confirm the saved user. Check the Team list before trying again.");
       }
 
       if (
@@ -5386,13 +5396,13 @@ export default function Home() {
         loadProfile(),
       ]);
 
-      setMessage(
+      setTeamAdminMessage(
         teamAdminMode === "new"
           ? "Team member login created."
           : "Team member updated."
       );
     } catch (error) {
-      setMessage(
+      setTeamAdminMessage(
         error instanceof Error
           ? error.message
           : "Team member could not be saved."
@@ -5417,6 +5427,7 @@ export default function Home() {
     if (!confirmed) return;
 
     setTeamAdminSaving(true);
+    setTeamAdminMessage("");
 
     try {
       const result = await teamAdminApi({
@@ -5427,7 +5438,7 @@ export default function Home() {
       });
 
       if (!result.ok) {
-        setMessage(
+        setTeamAdminMessage(
           result.payload?.error ||
             "Password could not be reset."
         );
@@ -5440,11 +5451,11 @@ export default function Home() {
           ""
       );
 
-      setMessage(
+      setTeamAdminMessage(
         "A new temporary password was created."
       );
     } catch (error) {
-      setMessage(
+      setTeamAdminMessage(
         error instanceof Error
           ? error.message
           : "Password could not be reset."
@@ -5465,11 +5476,11 @@ export default function Home() {
       await navigator.clipboard.writeText(
         teamTemporaryPassword
       );
-      setMessage(
+      setTeamAdminMessage(
         "Temporary password copied."
       );
     } catch {
-      setMessage(
+      setTeamAdminMessage(
         "Copy the temporary password manually."
       );
     }
@@ -22488,6 +22499,7 @@ export default function Home() {
                 onClick={
                   closeTeamAdminModal
                 }
+                disabled={teamAdminSaving}
                 aria-label="Close"
               >
                 ×
@@ -22673,6 +22685,13 @@ export default function Home() {
                 >
                   Copy Password
                 </button>
+              </div>
+            )}
+
+            {teamAdminMessage && (
+              <div role="status" aria-live="polite" className="team-admin-feedback"
+                style={{ padding: "12px 16px", marginTop: 16, border: "1px solid #b8c9d9", borderRadius: 8, background: "#f0f5fa", color: "#16334d" }}>
+                {teamAdminMessage}
               </div>
             )}
 
