@@ -56,3 +56,45 @@
 .method { font-size:10px; color:#8a9cad; line-height:1.7; margin:15px 0 20px; }
 @media (max-width:1150px) { .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .chartGrid,.lowerGrid { grid-template-columns:1fr; } }
 @media (max-width:650px) { .hero { flex-direction:column; align-items:stretch; padding:21px; } .metrics { grid-template-columns:1fr; } .panel { padding:17px; } .rankHeading { flex-wrap:wrap; } .monthGroup { min-width:28px; } .monthValue { font-size:8px; } }
+
+
+/* Owner stock position and incoming stock purchasing */
+.inventoryPanel { margin-top:16px; }
+.inventoryHeading { display:flex; align-items:start; justify-content:space-between; gap:14px; }
+.inventoryHeading .panelDescription { margin-bottom:0; }
+.inventoryActions { display:flex; flex-wrap:wrap; gap:8px; flex-shrink:0; }
+.inventoryMetrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:19px 0 18px; }
+.inventoryMetric { border:1px solid #dce8f0; border-radius:12px; background:linear-gradient(140deg,#f5f9fd,#fff); padding:17px; min-width:0; }
+.inventoryMetric span { display:block; font-size:10px; font-weight:800; color:#6b8499; letter-spacing:.45px; }
+.inventoryMetric strong { display:block; margin:7px 0 5px; color:#164a75; font-size:clamp(20px,2vw,27px); letter-spacing:-.4px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.inventoryMetric small { color:#8196a7; font-size:10.5px; line-height:1.5; }
+.stockHeading { display:flex; justify-content:space-between; border-top:1px solid #e8f0f6; padding-top:18px; margin-bottom:13px; }
+.stockHeading h3 { margin:0 0 5px; color:#24415d; font-size:15px; }
+.stockHeading p { margin:0; color:#718ba0; font-size:11px; line-height:1.6; }
+.stockNotice { border:1px solid #efdca5; background:#fffaea; padding:11px 12px; color:#7d5a20; border-radius:9px; font-size:11px; line-height:1.6; margin:0 0 14px; }
+.stockTableWrap { overflow:auto; width:100%; max-height:365px; border:1px solid #e1eaf1; border-radius:10px; }
+.stockTable { width:100%; border-collapse:collapse; min-width:700px; font-size:11.5px; }
+.stockTable th { position:sticky; top:0; z-index:1; background:#f2f7fb; text-align:left; color:#6b8296; font-weight:800; font-size:10px; letter-spacing:.45px; padding:12px; border-bottom:1px solid #dae7ef; white-space:nowrap; }
+.stockTable td { padding:12px; border-bottom:1px solid #eaf0f5; color:#60778c; vertical-align:top; }
+.stockTable tbody tr:hover { background:#f8fbfd; }
+.stockTable .numeric { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.stockTable td.numeric strong { color:#234b6d; }
+.stockVendor { font-weight:750; color:#284c6f!important; }
+.dashboard .stockPoLink { border:0; background:transparent; padding:0; color:#1a6198; font-size:12px; text-decoration:underline; text-underline-offset:3px; white-space:nowrap; }
+.dashboard .stockPoLink span { text-decoration:none; }
+.stockTable tfoot th,.stockTable tfoot td { background:#edf5fb; font-weight:800; color:#184a71; border-bottom:0; }
+.stockTable tfoot th { position:static; }
+.missingCost { display:block; color:#a35d2f; margin-top:4px; }
+.emptyStock { border:1px dashed #cddce8; padding:19px; border-radius:10px; background:#f8fbfd; }
+.emptyStock strong { font-size:12px; color:#355a7b; }
+.emptyStock p { font-size:11px; color:#738da1; line-height:1.7; margin:7px 0 0; }
+.stockVendorTotals { margin-top:17px; }
+.stockVendorTotals > .eyebrow { display:block; margin-bottom:9px; }
+.stockVendorTotals > div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 15px; }
+.stockVendorTotal { display:flex; justify-content:space-between; gap:12px; border-top:1px solid #e8f0f5; padding:10px 0; font-size:11.5px; }
+.stockVendorTotal span { color:#4b6a85; overflow-wrap:anywhere; }
+.stockVendorTotal small { color:#8199ab; }
+.stockVendorTotal strong { white-space:nowrap; color:#214b70; font-variant-numeric:tabular-nums; }
+.inventoryFootnote { color:#8a9ca9; font-size:10.5px; line-height:1.75; margin:15px 0 0; }
+@media(max-width:1000px) { .inventoryMetrics {grid-template-columns:repeat(2,minmax(0,1fr));} .inventoryHeading {flex-direction:column;} }
+@media(max-width:650px) { .inventoryMetrics {grid-template-columns:1fr;} .stockVendorTotals > div {grid-template-columns:1fr;} }
