@@ -107,3 +107,7 @@
 .vendorCommitmentNumbers span { color:#71879a; font-size:10.5px; }
 .vendorCommitmentNumbers strong { color:#234b70; font-weight:800; font-size:16px; font-variant-numeric:tabular-nums; }
 @media(max-width:650px) { .vendorCommitmentNumbers {justify-content:space-between;} }
+
+/* The owner’s personal checklist and notepad follow the executive KPIs, ahead of reports. */
+.workspaceBlock { margin-top: 18px; margin-bottom: 21px; }
+.workspaceBlock .personalIntro { margin: 0 0 12px; }
