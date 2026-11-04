@@ -175,6 +175,7 @@ export default function FinanceDashboard(props: Props) {
         <button className={styles.primary} onClick={props.onSales}>Sales orders & balances</button>
         <button onClick={props.onDailyCash}>Daily Cash & deposits</button>
         <button onClick={() => document.getElementById("finance-recent-payments")?.scrollIntoView({ behavior: "smooth" })}>Payment history ↓</button>
+        <button onClick={() => document.getElementById("finance-accounts")?.scrollIntoView({ behavior: "smooth" })}>Expense accounts ↓</button>
       </>}
     </div>
     {(receiptsError && !ap) && <p className={styles.warning} role="alert">Customer payment records could not be loaded: {receiptsError}. Receivables totals are hidden until payments are available.</p>}
@@ -208,7 +209,7 @@ export default function FinanceDashboard(props: Props) {
         </section>
       </> : <>
         <section className={styles.panel}>
-          <div className={styles.heading}><div><div className={styles.kicker}>MONEY STILL COMING IN</div><h2>Open customer balances</h2></div><button onClick={props.onSales}>View all sales →</button></div>
+          <div className={styles.heading}><div><div className={styles.kicker}>MONEY STILL COMING IN</div><h2>Open balances</h2></div><button onClick={props.onSales}>View all sales →</button></div>
           {receiptsLoading || props.loadingSales ? <p className={styles.empty}>Calculating sales balances…</p> : receiptsError ? <p className={styles.empty}>Payment history is needed before balances can be shown.</p> : filteredReceivables.length === 0 ? <p className={styles.empty}>No open balances match your search.</p> :
             filteredReceivables.slice(0, 12).map(({ sale, balance }) =>
               <button className={styles.record} key={sale.id} onClick={() => props.onSale(sale.id)}>
