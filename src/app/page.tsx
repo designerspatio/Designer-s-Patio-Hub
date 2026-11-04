@@ -11,6 +11,7 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
+import type { OwnerStockReceipt } from "./ownerInventory";
 import { type ExpenseAccount, type ExpenseAccountDraft, expenseKey } from "./financeAccounts";
 import { dashboardModeForProfile } from "./dashboardMode";
 import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
@@ -2454,6 +2455,9 @@ export default function Home() {
 
   const [inventoryItems, setInventoryItems] =
     useState<InventoryItem[]>([]);
+  const [ownerStockReceipts, setOwnerStockReceipts] = useState<OwnerStockReceipt[]>([]);
+  const [ownerStockReceiptsLoading, setOwnerStockReceiptsLoading] = useState(false);
+  const [ownerStockReceiptsError, setOwnerStockReceiptsError] = useState("");
   const [inventoryTags, setInventoryTags] =
     useState<InventoryTag[]>([]);
   const [selectedInventoryItem, setSelectedInventoryItem] =
@@ -3285,6 +3289,40 @@ export default function Home() {
     setPurchaseOrdersLoading(false);
   }, [supabase, session?.user?.id]);
 
+  const loadOwnerStockReceipts = useCallback(async () => {
+    if (!supabase || !session?.user?.id) {
+      setOwnerStockReceipts([]);
+      setOwnerStockReceiptsError("");
+      setOwnerStockReceiptsLoading(false);
+      return;
+    }
+    setOwnerStockReceiptsLoading(true);
+    setOwnerStockReceiptsError("");
+    try {
+      const rows: OwnerStockReceipt[] = [];
+      // Read all PO-linked receiving movements, not only the first Supabase page.
+      for (let start = 0; start < 30000; start += 1000) {
+        const { data, error } = await supabase
+          .from("inventory_movements")
+          .select("purchase_order_item_id,movement_type,quantity_change")
+          .not("purchase_order_item_id", "is", null)
+          .order("created_at", { ascending: true })
+          .range(start, start + 999);
+        if (error) throw error;
+        const page = (data || []) as OwnerStockReceipt[];
+        rows.push(...page);
+        if (page.length < 1000) break;
+        if (start === 29000) throw new Error("Inventory receipt history exceeds 30,000 records. Incoming stock amounts need a complete receipt history.");
+      }
+      setOwnerStockReceipts(rows);
+    } catch (error) {
+      setOwnerStockReceipts([]);
+      setOwnerStockReceiptsError(error instanceof Error ? error.message : "Could not read linked stock receipts.");
+    } finally {
+      setOwnerStockReceiptsLoading(false);
+    }
+  }, [supabase, session?.user?.id]);
+
   const loadInventoryItems = useCallback(async () => {
     if (!supabase || !session?.user?.id) {
       setInventoryItems([]);
@@ -4045,12 +4083,17 @@ export default function Home() {
   useEffect(() => {
     if (!session?.user?.id || profile?.role !== "Owner" || view !== "dashboard") return;
     const refreshBusiness = () => {
-      void Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadAccounting()]);
+      void Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadInventoryItems(), loadOwnerStockReceipts(), loadAccounting()]);
     };
     const timer = window.setInterval(refreshBusiness, 300000);
     window.addEventListener("focus", refreshBusiness);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshBusiness); };
-  }, [session?.user?.id, profile?.role, view, loadSalesOrders, loadQuotes, loadPurchaseOrders, loadAccounting]);
+  }, [session?.user?.id, profile?.role, view, loadSalesOrders, loadQuotes, loadPurchaseOrders, loadInventoryItems, loadOwnerStockReceipts, loadAccounting]);
+
+  useEffect(() => {
+    if (!session?.user?.id || profile?.role !== "Owner") return;
+    void loadOwnerStockReceipts();
+  }, [session?.user?.id, profile?.role, loadOwnerStockReceipts]);
 
   useEffect(() => {
     if (!profile?.id || !session?.user?.id) return;
@@ -5121,6 +5164,8 @@ export default function Home() {
     setAcknowledgementReviewIssues([]);
     setIssueResolutionDrafts({});
     setInventoryItems([]);
+    setOwnerStockReceipts([]);
+    setOwnerStockReceiptsError("");
     setInventoryTags([]);
     setSelectedInventoryItem(null);
     setInventoryScanCodes([]);
@@ -21263,6 +21308,12 @@ export default function Home() {
                 quotes={quotes}
                 quoteItems={quoteItemsSummary}
                 purchaseOrders={purchaseOrders}
+                inventory={inventoryItems}
+                purchaseOrderItems={purchaseOrderItemsSummary}
+                stockReceipts={ownerStockReceipts}
+                stockReceiptsError={ownerStockReceiptsError}
+                loadingInventory={inventoryLoading}
+                loadingStockReceipts={ownerStockReceiptsLoading}
                 invoices={vendorInvoices}
                 vendorPayments={vendorPayments}
                 team={team}
@@ -21271,10 +21322,12 @@ export default function Home() {
                 loadingQuotes={quotesLoading}
                 loadingPurchases={purchaseOrdersLoading}
                 loadingAccounting={accountingLoading}
-                onRefresh={async () => { await Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadAccounting()]); }}
+                onRefresh={async () => { await Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadInventoryItems(), loadOwnerStockReceipts(), loadAccounting()]); }}
                 onSales={() => { setView("sales"); setRecordScope("all"); setScopeSalespersonId(""); }}
                 onQuotes={() => { setView("quotes"); setRecordScope("all"); setScopeSalespersonId(""); }}
                 onPurchases={() => { setView("purchase_orders"); setRecordScope("all"); setScopeSalespersonId(""); }}
+                onInventory={() => setView("inventory")}
+                onPurchaseOrder={id => { const order = purchaseOrders.find(po => po.id === id); if (order) { setView("purchase_orders"); void openPurchaseOrder(order); } }}
                 onAccounting={() => { setView("accounting"); setAccountingSection("invoices"); }}
                 onReports={() => setView("reports")}
               />}
