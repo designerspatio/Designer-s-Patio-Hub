@@ -15,6 +15,11 @@ test("Accounting Team sees receivables", () => {
   assert.equal(dashboardModeForProfile({ display_name: "Accounting Team", role: "Shipping / Accounting", email: "ar@designerspatio.com" }), "receivables");
   assert.equal(dashboardModeForProfile({ display_name: "Accounting", role: "Shipping / Accounting", email: "accounting@designerspatio.com" }), "receivables");
 });
+test("Owner login opens executive business highlights without affecting other roles", () => {
+  assert.equal(dashboardModeForProfile({ display_name: "Geneva", role: "Owner", email: "showroom@designerspatio.com" }), "owner");
+  assert.equal(dashboardModeForProfile({ display_name: "Pamela Williams", role: "Shipping / Accounting", email: "accounting@designerspatio.com" }), "payables");
+  assert.equal(dashboardModeForProfile({ display_name: "Accounting Team", role: "Shipping / Accounting", email: "accounting@designerspatio.com" }), "receivables");
+});
 test("Normal sales users stay on sales dashboard", () => {
   assert.equal(dashboardModeForProfile({ display_name: "Joey", role: "Assistant Manager", email: "sales@designerspatio.com" }), "sales");
   assert.equal(dashboardModeForProfile(null), "sales");
