@@ -1,0 +1,58 @@
+.dashboard { --blue:#164e81; --ink:#1b344f; --muted:#667f95; color:var(--ink); }
+.dashboard * { box-sizing:border-box; }
+.dashboard button { cursor:pointer; border-radius:9px; font-size:12px; font-weight:750; padding:10px 13px; background:#fff; color:var(--blue); border:1px solid #d8e4ec; }
+.dashboard button:hover:not(:disabled) { background:#edf5fb; }
+.dashboard button:focus-visible { outline:3px solid #94bcea; outline-offset:2px; }
+.dashboard button:disabled { opacity:.6; cursor:wait; }
+.hero { background:linear-gradient(115deg,#e3eef8,#f8fbfe); border:1px solid #d8e7f3; padding:25px 29px; border-radius:17px; display:flex; justify-content:space-between; gap:18px; align-items:center; }
+.eyebrow { font-size:10px; font-weight:850; color:#5680a6; letter-spacing:1.1px; }
+.hero h1 { margin:9px 0; font-size:clamp(25px,2.5vw,34px); letter-spacing:-.7px; color:#1c3e5c; }
+.hero p { font-size:13px; color:#60778e; line-height:1.6; margin:0 0 12px; max-width:680px; }
+.date { font-size:11px; font-weight:750; color:#507394; }
+.dashboard .refresh { flex-shrink:0; background:#174b83; border-color:#174b83; color:white; }
+.dashboard .refresh:hover:not(:disabled) { background:#133e6c; }
+.updated,.updating { font-size:11px; color:#64859f; margin-top:8px; }
+.updating { background:#f5f9fd; border:1px solid #dce9f4; border-radius:7px; padding:9px; }
+.quickActions { display:flex; flex-wrap:wrap; gap:9px; margin:16px 0; }
+.metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.metric { min-width:0; padding:19px; border:1px solid #dae6f0; background:white; border-radius:13px; box-shadow:0 4px 12px #1c47730b; }
+.metric > span { display:block; font-size:10px; color:#61819c; font-weight:850; letter-spacing:.5px; }
+.metric > strong { display:block; font-size:clamp(21px,2.2vw,29px); font-weight:850; margin:9px 0 5px; overflow-wrap:anywhere; letter-spacing:-.5px; }
+.metric > small { color:#70889b; font-size:10.5px; line-height:1.5; }
+.chartGrid,.lowerGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:16px; align-items:stretch; }
+.panel { min-width:0; background:white; border:1px solid #dce7ef; border-radius:14px; padding:23px; }
+.panel h2 { font-size:19px; color:#203f5d; letter-spacing:-.35px; margin:6px 0 6px; }
+.panelDescription { font-size:11px; color:#778da0; line-height:1.65; margin:0 0 15px; }
+.rankList { display:flex; flex-direction:column; gap:19px; margin-top:20px; }
+.rankHeading { display:flex; justify-content:space-between; gap:10px; align-items:center; font-size:12px; margin-bottom:6px; }
+.rankHeading > strong { color:#284b6b; font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.rankName { display:flex; gap:8px; align-items:center; min-width:0; }
+.rankName strong { overflow-wrap:anywhere; font-size:12px; }
+.rankIndex { width:19px; height:19px; flex-shrink:0; text-align:center; line-height:19px; border-radius:5px; background:#edf4fa; color:#466e91; font-size:10px; font-weight:850; }
+.track { height:11px; border-radius:6px; overflow:hidden; background:#edf3f8; }
+.fill { height:100%; border-radius:6px; background:linear-gradient(90deg,#2369a3,#74abd8); }
+.rankMeta { font-size:10px; color:#8ba0b2; margin-top:5px; }
+.empty { font-size:12px; color:#7890a3; margin:22px 0; line-height:1.6; }
+.monthChart { display:flex; align-items:stretch; justify-content:space-between; gap:7px; min-height:230px; overflow-x:auto; padding-top:8px; }
+.monthGroup { display:flex; flex-direction:column; align-items:center; flex:1; min-width:32px; min-height:222px; justify-content:flex-end; }
+.monthBarArea { width:100%; max-width:42px; height:170px; background:#eff5fa; border-radius:7px 7px 0 0; overflow:hidden; display:flex; align-items:flex-end; }
+.monthBar { width:100%; background:linear-gradient(0deg,#1c629b,#7db3db); border-radius:6px 6px 0 0; min-height:0; }
+.monthValue { white-space:nowrap; font-size:10px; font-weight:750; color:#557897; padding-bottom:8px; }
+.monthLabel { font-size:10px; font-weight:700; color:#778e9f; padding-top:9px; }
+.highlights { padding-top:7px; }
+.highlight { display:flex; gap:10px; padding:12px 0; border-bottom:1px solid #edf2f6; }
+.highlight:last-child { border:0; }
+.highlight p { margin:0; font-size:12px; line-height:1.7; color:#4e6a81; }
+.dot { width:7px; height:7px; margin-top:7px; background:#4192c1; border-radius:50%; flex-shrink:0; }
+.dashboard .alertRow { width:100%; border:0; border-top:1px solid #ecf0f4; border-radius:0; padding:14px 4px; text-align:left; background:transparent; }
+.alertRow strong { display:block; font-size:12px; color:#214566; }
+.alertRow span { display:block; margin-top:4px; color:#7a92a6; font-size:11px; font-weight:400; line-height:1.6; }
+.financialStat { display:flex; justify-content:space-between; align-items:center; gap:15px; border-bottom:1px solid #ecf1f5; padding:15px 0; font-size:12px; color:#657e94; }
+.financialStat strong { color:#244f74; font-size:16px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.dashboard .linkButton { margin-top:8px; }
+.personalIntro { margin:28px 0 12px; }
+.personalIntro h2 { font-size:21px; letter-spacing:-.35px; margin:7px 0; }
+.personalIntro p { margin:0; color:#73889a; font-size:12px; line-height:1.65; }
+.method { font-size:10px; color:#8a9cad; line-height:1.7; margin:15px 0 20px; }
+@media (max-width:1150px) { .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .chartGrid,.lowerGrid { grid-template-columns:1fr; } }
+@media (max-width:650px) { .hero { flex-direction:column; align-items:stretch; padding:21px; } .metrics { grid-template-columns:1fr; } .panel { padding:17px; } .rankHeading { flex-wrap:wrap; } .monthGroup { min-width:28px; } .monthValue { font-size:8px; } }
