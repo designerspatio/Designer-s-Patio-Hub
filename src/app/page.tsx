@@ -10,6 +10,7 @@ import ExpenseCsvPanel from "./ExpenseCsvPanel";
 import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
+import { type ExpenseAccount, type ExpenseAccountDraft, expenseKey } from "./financeAccounts";
 import { dashboardModeForProfile } from "./dashboardMode";
 import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
 import { matchesRecordScope, type RecordScope } from "./recordScope";
@@ -2557,6 +2558,10 @@ export default function Home() {
     useState<VendorPayment[]>([]);
   const [expenses, setExpenses] =
     useState<Expense[]>([]);
+  const [expenseAccounts, setExpenseAccounts] = useState<ExpenseAccount[]>([]);
+  const [expenseAccountsVersion, setExpenseAccountsVersion] = useState(0);
+  const [expenseAccountsLoading, setExpenseAccountsLoading] = useState(false);
+  const [expenseAccountsError, setExpenseAccountsError] = useState("");
   const [accountingLoading, setAccountingLoading] =
     useState(false);
   const [accountingSearch, setAccountingSearch] =
@@ -3487,6 +3492,43 @@ export default function Home() {
     [supabase]
   );
 
+  const loadExpenseAccounts = useCallback(async () => {
+    if (!supabase || !session?.user?.id) {
+      setExpenseAccounts([]); setExpenseAccountsVersion(0); return;
+    }
+    setExpenseAccountsLoading(true); setExpenseAccountsError("");
+    try {
+      const auth = await supabase.auth.getSession();
+      const token = auth.data.session?.access_token;
+      if (!token) throw new Error("Sign in to load expense accounts.");
+      const response = await fetch("/api/expense-accounts", {cache:"no-store",headers:{Authorization:`Bearer ${token}`}});
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not load shared expense accounts.");
+      setExpenseAccounts(payload.accounts || []);
+      setExpenseAccountsVersion(Number(payload.version) || 0);
+    } catch (error) { setExpenseAccountsError(error instanceof Error ? error.message : "Could not load shared expense accounts."); }
+    finally { setExpenseAccountsLoading(false); }
+  }, [supabase, session?.user?.id]);
+
+  async function addExpenseAccount(draft: ExpenseAccountDraft): Promise<{ok:boolean;error?:string}> {
+    if (!supabase) return {ok:false,error:"Sign in to create an expense account."};
+    try {
+      const auth = await supabase.auth.getSession();
+      const token = auth.data.session?.access_token;
+      if (!token) return {ok:false,error:"Sign in again to create an expense account."};
+      const response = await fetch("/api/expense-accounts",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({version:expenseAccountsVersion,account:draft})});
+      const payload = await response.json();
+      if (!response.ok) {
+        if (response.status === 409) void loadExpenseAccounts();
+        return {ok:false,error:payload.error || "Could not save expense account."};
+      }
+      setExpenseAccounts(payload.accounts || []);
+      setExpenseAccountsVersion(Number(payload.version) || 0);
+      setExpenseAccountsError("");
+      return {ok:true};
+    }catch(error){return {ok:false,error:error instanceof Error?error.message:"Could not save account."};}
+  }
+
   const loadAccounting = useCallback(async () => {
     if (!supabase || !session?.user?.id) {
       setVendorInvoices([]);
@@ -3998,6 +4040,12 @@ export default function Home() {
     loadPriceLists,
     loadAcknowledgementLibrary,
   ]);
+
+  useEffect(() => {
+    if (!profile?.id || !session?.user?.id) return;
+    const financeRole = dashboardModeForProfile(profile) !== "sales" || ["Owner","Manager","Assistant Manager"].includes(profile.role);
+    if (financeRole) void loadExpenseAccounts();
+  }, [profile?.id, profile?.role, profile?.display_name, session?.user?.id, loadExpenseAccounts]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -5076,6 +5124,9 @@ export default function Home() {
     setVendorInvoices([]);
     setVendorPayments([]);
     setExpenses([]);
+    setExpenseAccounts([]);
+    setExpenseAccountsVersion(0);
+    setExpenseAccountsError("");
     setAiFinderPrompt("");
     setAiFinderManufacturerId("");
     setAiFinderCategory("");
@@ -21221,6 +21272,11 @@ export default function Home() {
               invoices={vendorInvoices}
               vendorPayments={vendorPayments}
               expenses={expenses}
+              expenseAccounts={expenseAccounts}
+              expenseAccountsLoading={expenseAccountsLoading}
+              expenseAccountsError={expenseAccountsError}
+              onAddExpenseAccount={addExpenseAccount}
+              onNewExpenseForAccount={account => { setView("accounting"); setAccountingSection("expenses"); openNewExpense(); setExpenseForm(current => ({...current,payee:account.payee,category:account.category})); }}
               clients={Object.fromEntries(clients.map(client => [client.id, getClientName(client)]))}
               manufacturers={Object.fromEntries(manufacturers.map(manufacturer => [manufacturer.id, manufacturer.name]))}
               loadingSales={salesLoading}
@@ -21234,7 +21290,7 @@ export default function Home() {
               onPurchases={() => { setView("purchase_orders"); setRecordScope("all"); setScopeSalespersonId(""); }}
               onNewInvoice={() => { setView("accounting"); setAccountingSection("invoices"); openNewVendorInvoice(); }}
               onNewExpense={() => { setView("accounting"); setAccountingSection("expenses"); openNewExpense(); }}
-              onRefresh={async () => { await Promise.all([loadSalesOrders(), loadAccounting(), loadDailyCashBatches()]); }}
+              onRefresh={async () => { await Promise.all([loadSalesOrders(), loadAccounting(), loadDailyCashBatches(), loadExpenseAccounts()]); }}
             />}
           </div>
 
@@ -29807,6 +29863,19 @@ export default function Home() {
                         )
                       }
                     />
+                  </FormField>
+
+                  <FormField label="Expense account">
+                    <select
+                      value={expenseAccounts.find(account => expenseKey(account.payee) === expenseKey(expenseForm.payee) && expenseKey(account.category) === expenseKey(expenseForm.category))?.id || ""}
+                      onChange={event => {
+                        const account = expenseAccounts.find(item => item.id === event.target.value);
+                        if (account) setExpenseForm(current => ({...current,payee:account.payee,category:account.category}));
+                      }}
+                    >
+                      <option value="">No tracked account / custom expense</option>
+                      {expenseAccounts.map(account => <option value={account.id} key={account.id}>{account.name} · {account.payee}</option>)}
+                    </select>
                   </FormField>
 
                   <FormField label="Payee">
