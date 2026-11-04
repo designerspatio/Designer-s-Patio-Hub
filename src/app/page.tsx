@@ -18522,6 +18522,31 @@ export default function Home() {
   const dashboardMode = dashboardModeForProfile(profile);
   const canManageStockOrders = ["Owner","Manager","Assistant Manager","Shipping / Accounting"].includes(profile?.role||"");
 
+  // Reuse the original saved workspace, placed beneath the owner KPIs for Geneva.
+  // Sales-role dashboards continue rendering the same workspace as before.
+  const personalDashboard = (
+              <SalesDashboard
+              workspaceOnly={dashboardMode === "owner"}
+              key={session.user.id}
+              userId={session.user.id}
+              firstName={firstName}
+              onDirtyChange={setDashboardDirty}
+              supabase={supabase}
+              scopeLabel={recordScope === "mine" ? "My clients & quotes" : scopeSalespersonId === "__unassigned__" ? "Unassigned clients & quotes" : scopeSalespersonId ? `${salespersonName(scopeSalespersonId)} · clients & quotes` : "All clients & quotes"}
+              loading={clientsLoading || quotesLoading}
+              clients={scopedClients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              allClients={clients.filter(client => client.active !== false).map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
+              quotes={scopedQuotes}
+              onClient={id => { const client = clients.find(item => item.id === id); if (client) { setView("clients"); void openClient(client); } }}
+              onQuote={id => { const quote = quotes.find(item => item.id === id); if (quote) { setView("quotes"); void openQuote(quote); } }}
+              onNewClient={() => { setView("clients"); openNewClient(); }}
+              onNewQuote={() => { setView("quotes"); openNewQuote(); }}
+              onScan={() => setView("scan")}
+              onClients={() => setView("clients")}
+              onQuotes={() => setView("quotes")}
+            />
+  );
+
   return (
     <>
       <style>{appCss}</style>
@@ -21385,27 +21410,9 @@ export default function Home() {
                 onPurchaseOrder={id => { const order = purchaseOrders.find(po => po.id === id); if (order) { setView("purchase_orders"); void openPurchaseOrder(order); } }}
                 onAccounting={() => { setView("accounting"); setAccountingSection("invoices"); }}
                 onReports={() => setView("reports")}
+                workspace={personalDashboard}
               />}
-              <SalesDashboard
-              workspaceOnly={dashboardMode === "owner"}
-              key={session.user.id}
-              userId={session.user.id}
-              firstName={firstName}
-              onDirtyChange={setDashboardDirty}
-              supabase={supabase}
-              scopeLabel={recordScope === "mine" ? "My clients & quotes" : scopeSalespersonId === "__unassigned__" ? "Unassigned clients & quotes" : scopeSalespersonId ? `${salespersonName(scopeSalespersonId)} · clients & quotes` : "All clients & quotes"}
-              loading={clientsLoading || quotesLoading}
-              clients={scopedClients.map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
-              allClients={clients.filter(client => client.active !== false).map(client => ({ id: client.id, name: getClientName(client), email: client.email, phone: client.phone, location: getLocation(client) }))}
-              quotes={scopedQuotes}
-              onClient={id => { const client = clients.find(item => item.id === id); if (client) { setView("clients"); void openClient(client); } }}
-              onQuote={id => { const quote = quotes.find(item => item.id === id); if (quote) { setView("quotes"); void openQuote(quote); } }}
-              onNewClient={() => { setView("clients"); openNewClient(); }}
-              onNewQuote={() => { setView("quotes"); openNewQuote(); }}
-              onScan={() => setView("scan")}
-              onClients={() => setView("clients")}
-              onQuotes={() => setView("quotes")}
-            /></> : <FinanceDashboard
+{dashboardMode === "sales" && personalDashboard}</> : <FinanceDashboard
               key={session.user.id + "-" + dashboardMode}
               mode={dashboardMode}
               firstName={firstName}

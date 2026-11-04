@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { buildOwnerHighlights, type OwnerInput, type SalesRank } from "./ownerHighlights";
 import OwnerInventoryPanel from "./OwnerInventoryPanel";
 import { type StockOrder, type StockOrderReceived } from "./stockOrders";
@@ -8,6 +8,7 @@ import { summarizeOwnerInventory, type OwnerStockPO, type OwnerStockItem, type O
 import styles from "./OwnerDashboard.module.css";
 
 type Props = Omit<OwnerInput,"today" | "purchaseOrders"> & {
+  workspace: ReactNode;
   purchaseOrders: OwnerStockPO[];
   stockOrders: StockOrder[];
   stockReceived: StockOrderReceived;
@@ -96,8 +97,12 @@ export default function OwnerDashboard(props:Props) {
     <section className={styles.metrics} aria-label="Business performance indicators">
       <div className={styles.metric}><span>YTD NET MERCHANDISE SALES</span><strong>{currency(data.ytdSales)}</strong><small>{data.hasComparison && data.previousYtdSales>0 ? `${data.ytdSales>=data.previousYtdSales?"▲":"▼"} ${Math.abs((data.ytdSales-data.previousYtdSales)/data.previousYtdSales*100).toFixed(1)}% vs same period last year` : "Booked sales orders, before freight and tax"}</small></div>
       <div className={styles.metric}><span>{monthName.toUpperCase()} SALES TO DATE</span><strong>{currency(data.thisMonthSales)}</strong><small>{data.thisMonthOrders} {data.thisMonthOrders===1?"order":"orders"} booked this month</small></div>
-      <div className={styles.metric}><span>YTD SALES ORDERS</span><strong>{data.ytdOrders.toLocaleString()}</strong><small>Average merchandise sale {currency(data.averageOrder)}</small></div>
-      <div className={styles.metric}><span>OPEN QUOTE PIPELINE</span><strong>{currency(data.openQuoteValue)}</strong><small>{data.openQuotes} unconverted {data.openQuotes===1?"quote":"quotes"} · not booked sales</small></div>
+      <div className={styles.metric}><span>YTD SALES ORDERS</span><strong>{data.ytdOrders.toLocaleString()}</strong><small>Booked sales orders this year</small></div>
+      <div className={styles.metric}><span>AVERAGE ORDER VALUE</span><strong>{currency(data.averageOrder)}</strong><small>Booked merchandise sales per YTD order</small></div>
+    </section>
+    <section aria-label="Personal checklist and notes" className={styles.workspaceBlock}>
+      <div className={styles.personalIntro}><div className={styles.eyebrow}>YOUR PERSONAL WORKSPACE</div><h2>Checklist & notes</h2><p>Your private task list and notepad are right here when you open your dashboard. They save to your existing Hub workspace.</p></div>
+      {props.workspace}
     </section>
     <div className={styles.chartGrid}>
       <RankChart title="Top 5 manufacturers" description="Ranked by net merchandise sales on sales orders dated this year. Freight, taxes and other charges are excluded." rows={data.topManufacturers} none="No manufacturer sales recorded for this year yet."/>
@@ -141,7 +146,6 @@ export default function OwnerDashboard(props:Props) {
       </div>
       <button className={styles.linkButton} onClick={props.onAccounting}>View accounting →</button>
     </section>
-    <div className={styles.personalIntro}><div className={styles.eyebrow}>YOUR PERSONAL WORKSPACE</div><h2>Checklist & notes</h2><p>Your private task list and notepad remain available below. They save to your existing Hub workspace.</p></div>
     <p className={styles.method}>Sales are assigned to the order date and the salesperson on each sales order. Manufacturer rankings use each line’s net selling price × quantity. Figures reflect Hub records available to this login and are not a cash-received or accounting profit report.</p>
   </div>;
 }
