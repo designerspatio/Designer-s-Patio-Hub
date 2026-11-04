@@ -57,3 +57,20 @@ test("a sale-linked PO or line never qualifies as stock",()=>{
  assert.equal(isIncomingStockPO(purchaseOrders[0],lines.po1),true);
  assert.equal(isIncomingStockPO(purchaseOrders[4],lines.po5),false);
 });
+
+
+test("standalone stock purchase orders feed owner incoming valuation without counting received units twice",()=>{
+ const standalone={id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",sequence:25,manufacturer_id:"ebel",
+  status:"Shipped",order_date:"2026-11-01",estimated_ship_date:"2026-11-08",notes:null,
+  created_by:"owner",created_at:"2026-11-01",updated_at:"2026-11-01",
+  lines:[{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",inventory_item_id:"a",name:"Ebel chair",sku:"CHAIR",quantity:5,unit_cost:125}]};
+ const result=summarizeOwnerInventory(inventory,[],{}, {ebel:"Ebel"},[],[standalone],{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb":2});
+ assert.equal(result.incomingPOCount,1);
+ assert.equal(result.incomingCost,375);
+ assert.equal(result.incomingOrders[0].displayNumber,"STK-0025");
+ assert.equal(result.incomingOrders[0].stockOrderId,standalone.id);
+ assert.equal(result.projectedCost,1085);
+ const fullyReceived=summarizeOwnerInventory(inventory,[],{}, {ebel:"Ebel"},[],[standalone],{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb":5});
+ assert.equal(fullyReceived.incomingCost,0);
+ assert.equal(fullyReceived.incomingPOCount,0);
+});
