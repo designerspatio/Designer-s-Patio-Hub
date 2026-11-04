@@ -173,7 +173,7 @@ async function receive(admin:SupabaseClient,bucket:Store,body:{
    const line=active.lines.find(item=>item.id===entry.line_id);
    if(!line)throw new HttpError("One of the stock order lines has changed. Refresh before receiving.",409);
    const note=stockLineMarker(active.id,line.id);
-   const reason=stockReceiptReason(body.receipt_id);
+   const reason=stockReceiptReason(body.receipt_id,active.sequence);
    // Retry of the SAME receipt ID must not increment stock twice.
    const {data:prior,error:priorError}=await admin.from("inventory_movements")
      .select("id,quantity_change").eq("notes",note).eq("reason",reason).limit(1);
