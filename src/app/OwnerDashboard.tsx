@@ -2,9 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { buildOwnerHighlights, type OwnerInput, type SalesRank } from "./ownerHighlights";
+import OwnerInventoryPanel from "./OwnerInventoryPanel";
+import { summarizeOwnerInventory, type OwnerStockPO, type OwnerStockItem, type OwnerStockLine, type OwnerStockReceipt } from "./ownerInventory";
 import styles from "./OwnerDashboard.module.css";
 
-type Props = Omit<OwnerInput,"today"> & {
+type Props = Omit<OwnerInput,"today" | "purchaseOrders"> & {
+  purchaseOrders: OwnerStockPO[];
+  inventory: OwnerStockItem[];
+  purchaseOrderItems: Record<string,OwnerStockLine[]>;
+  stockReceipts: OwnerStockReceipt[];
+  stockReceiptsError: string;
+  loadingInventory: boolean;
+  loadingStockReceipts: boolean;
+  onInventory: ()=>void;
+  onPurchaseOrder: (id:string)=>void;
   firstName:string;
   loadingSales:boolean; loadingQuotes:boolean; loadingPurchases:boolean; loadingAccounting:boolean;
   onRefresh:()=>Promise<void>; onSales:()=>void; onQuotes:()=>void; onPurchases:()=>void; onAccounting:()=>void; onReports:()=>void;
@@ -42,15 +53,11 @@ export default function OwnerDashboard(props:Props) {
     return ()=>{window.clearInterval(timer);window.removeEventListener("focus",onFocus);};
   },[]);
   const data=useMemo(()=>buildOwnerHighlights({...props,today}),[props.sales,props.saleItems,props.quotes,props.quoteItems,props.purchaseOrders,props.invoices,props.vendorPayments,props.team,props.manufacturers,today]);
-  const loading=props.loadingSales||props.loadingQuotes||props.loadingPurchases||props.loadingAccounting;
+  const loading=props.loadingSales||props.loadingQuotes||props.loadingPurchases||props.loadingAccounting||props.loadingInventory||props.loadingStockReceipts;
+  const inventorySummary=useMemo(()=>summarizeOwnerInventory(props.inventory,props.purchaseOrders,props.purchaseOrderItems,Object.fromEntries(props.manufacturers.map(m=>[m.id,m.name])),props.stockReceipts),[props.inventory,props.purchaseOrders,props.purchaseOrderItems,props.manufacturers,props.stockReceipts]);
   const maxMonth=data.months.reduce((max,month)=>Math.max(max,month.amount),0);
   const monthName=new Date(today+"T12:00:00").toLocaleDateString("en-US",{month:"long"});
   const bestMaker=data.topManufacturers[0],bestRep=data.salespeople[0];
-  const alerts=[
-    data.draftPurchaseOrders>0 && {title:`${data.draftPurchaseOrders} draft purchase ${data.draftPurchaseOrders===1?"order":"orders"}`,description:"Draft POs to review before placing with manufacturers",action:props.onPurchases},
-    data.billsDueSoon>0 && {title:`${data.billsDueSoon} vendor ${data.billsDueSoon===1?"bill":"bills"} due within 7 days or overdue`,description:`${currency(data.dueSoonBalance)} in recorded open vendor invoices`,action:props.onAccounting},
-    data.openQuotes>0 && {title:`${data.openQuotes} unconverted ${data.openQuotes===1?"quote":"quotes"}`,description:`${currency(data.openQuoteValue)} in quoted merchandise awaiting conversion`,action:props.onQuotes},
-  ].filter((item):item is {title:string;description:string;action:()=>void}=>Boolean(item));
   const highlights=[
     data.ytdOrders>0 ? `${data.ytdOrders} sales ${data.ytdOrders===1?"order has":"orders have"} been booked this year, averaging ${currency(data.averageOrder)} in merchandise per order.` : "No booked sales orders are recorded for this year yet.",
     bestMaker ? `${bestMaker.name} leads the manufacturer mix with ${currency(bestMaker.amount)} in YTD merchandise sales.` : "Manufacturer rankings will appear once sales orders have items.",
@@ -107,20 +114,23 @@ export default function OwnerDashboard(props:Props) {
         <div className={styles.highlights}>{highlights.map((highlight,index)=><div className={styles.highlight} key={index}><span className={styles.dot}/><p>{highlight}</p></div>)}</div>
       </section>
     </div>
-    <div className={styles.lowerGrid}>
-      <section className={styles.panel}>
-        <div className={styles.eyebrow}>NEXT STEPS</div><h2>Items worth a look</h2>
-        {alerts.length ? alerts.map(item=><button className={styles.alertRow} onClick={item.action} key={item.title}><strong>{item.title}</strong><span>{item.description}</span></button>) : <p className={styles.empty}>No draft purchase orders, near-due vendor bills or unconverted quotes currently appear in the Hub.</p>}
-      </section>
-      <section className={styles.panel}>
-        <div className={styles.eyebrow}>PURCHASING SNAPSHOT</div><h2>Vendor commitments</h2>
-        <div className={styles.financialStat}><span>Open vendor invoice balances</span><strong>{currency(data.openVendorBalance)}</strong></div>
-        <div className={styles.financialStat}><span>Open vendor invoices</span><strong>{data.openVendorBills}</strong></div>
-        <div className={styles.financialStat}><span>Draft purchase orders</span><strong>{data.draftPurchaseOrders}</strong></div>
-        <p className={styles.panelDescription}>Based on recorded vendor invoices and payments. Draft purchase orders are shown as a count, not as amounts due.</p>
-        <button className={styles.linkButton} onClick={props.onAccounting}>Review accounting →</button>
-      </section>
-    </div>
+    <OwnerInventoryPanel
+      summary={inventorySummary}
+      loading={props.loadingInventory || props.loadingPurchases || props.loadingStockReceipts}
+      receiptsError={props.stockReceiptsError}
+      onInventory={props.onInventory}
+      onPurchaseOrders={props.onPurchases}
+      onPurchaseOrder={props.onPurchaseOrder}
+    />
+    <section className={`${styles.panel} ${styles.vendorCommitmentStrip}`}>
+      <div><div className={styles.eyebrow}>PURCHASING SNAPSHOT</div><h2>Vendor commitments</h2></div>
+      <div className={styles.vendorCommitmentNumbers}>
+        <div><span>Open vendor invoice balances</span><strong>{currency(data.openVendorBalance)}</strong></div>
+        <div><span>Open vendor invoices</span><strong>{data.openVendorBills}</strong></div>
+        <div><span>Draft purchase orders</span><strong>{data.draftPurchaseOrders}</strong></div>
+      </div>
+      <button className={styles.linkButton} onClick={props.onAccounting}>View accounting →</button>
+    </section>
     <div className={styles.personalIntro}><div className={styles.eyebrow}>YOUR PERSONAL WORKSPACE</div><h2>Checklist & notes</h2><p>Your private task list and notepad remain available below. They save to your existing Hub workspace.</p></div>
     <p className={styles.method}>Sales are assigned to the order date and the salesperson on each sales order. Manufacturer rankings use each line’s net selling price × quantity. Figures reflect Hub records available to this login and are not a cash-received or accounting profit report.</p>
   </div>;
