@@ -39,3 +39,36 @@
 .warning { background: #fff8e9; color: #7b5b2a; border: 1px solid #f0dba8; padding: 12px; border-radius: 9px; font-size: 12px; }
 @media (max-width:1100px) { .columns { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width:700px) { .hero { padding: 20px; flex-direction: column; align-items: stretch; } .heroActions { flex-direction: row; align-items: center; justify-content: space-between; } .metrics { grid-template-columns: 1fr; } .searchBar { flex-wrap: wrap; } .searchBar label { width: 100%; } .panel { padding: 15px; } .end { min-width: 85px!important; } }
+
+
+.accountGrids { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 18px; align-items: start; }
+.info { color: #71879a; line-height: 1.65; font-size: 11px; margin: 0 0 14px; }
+.tableScroll { width: 100%; overflow-x: auto; }
+.ledgerTable { border-collapse: collapse; width: 100%; min-width: 450px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ledgerTable th { color: #6b8093; font-size: 10px; text-align: right; padding: 10px 7px; border-bottom: 1px solid #dce7ef; }
+.ledgerTable th:first-child { text-align: left; }
+.ledgerTable td { padding: 11px 7px; text-align: right; border-bottom: 1px solid #eff2f6; white-space: nowrap; }
+.ledgerTable td:first-child { text-align: left; }
+.dashboard .vendorButton { white-space: normal; text-align: left; border: 0; background: transparent; padding: 2px; font-size: 12px; font-weight: 750; }
+.vendorButton small { color: #8b9baa; font-size: 10px; font-weight: 400; }
+.openValue { font-weight: 800; color: #143f68; }
+.vendorDetail { background: #f7fafd; }
+.vendorDetail td { white-space: normal; padding: 12px; }
+.dashboard .invoiceLink { width: 100%; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; text-align: left; gap: 4px 12px; border: 0; border-bottom: 1px solid #e6edf3; padding: 9px; background: transparent; }
+.invoiceLink span { white-space: normal; font-size: 11px; }
+.invoiceLink span:first-child { color: #254c73; font-weight: 700; }
+.invoiceLink span:last-child { color: #637d93; }
+.accountForm { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; background: #f5f9fd; border: 1px solid #d9e6f1; border-radius: 11px; padding: 15px; margin-bottom: 14px; }
+.accountForm label { display: flex; flex-direction: column; gap: 7px; color: #5a7187; font-size: 11px; font-weight: 700; }
+.accountForm label:first-child { grid-column: 1 / -1; }
+.accountForm input { border: 1px solid #cbdce9; border-radius: 7px; padding: 9px; font-size: 12px; min-width: 0; width: 100%; }
+.formActions { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; grid-column: 1 / -1; }
+.accountForm .warning { grid-column: 1 / -1; margin: 0; }
+.expenseAccount { display: flex; gap: 12px; justify-content: space-between; align-items: center; padding: 13px 0; border-bottom: 1px solid #eaf0f5; }
+.expenseAccount > div:first-child { min-width: 0; }
+.expenseAccount strong { display: block; color: #1d405f; font-size: 12px; }
+.expenseAccount span { color: #8193a3; font-size: 10.5px; line-height: 1.5; display: block; overflow-wrap: anywhere; }
+.expenseAccount .end strong { font-size: 14px; }
+.dashboard .expenseAccount .end button { margin-top: 8px; white-space: nowrap; font-size: 10px; padding: 6px 8px; }
+@media (max-width:1200px) { .accountGrids { grid-template-columns: 1fr; } }
+@media (max-width:530px) { .accountForm { grid-template-columns: 1fr; } .accountForm label { grid-column: 1 / -1; } .expenseAccount { align-items: flex-start; } .expenseAccount .end { min-width: 100px!important; } }
