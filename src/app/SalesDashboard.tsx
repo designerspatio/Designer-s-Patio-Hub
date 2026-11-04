@@ -128,7 +128,7 @@ export default function SalesDashboard(props: Props) {
         <p>A little organization. A timely follow-up. A stronger client relationship.</p></div>
       <div className={styles.date}>{new Date(`${today}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}<span>Make room for your next great conversation.</span></div>
     </header>}
-    {!props.workspaceOnly && <div className={styles.quickActions} aria-label="Sales shortcuts">
+    {!props.workspaceOnly && <><div className={styles.quickActions} aria-label="Sales shortcuts">
       <button className={styles.primary} onClick={props.onNewQuote}>＋ New quote</button>
       <button onClick={props.onNewClient}>＋ New client</button><button onClick={props.onScan}>Scan a badge</button><button onClick={props.onClients}>Find a client →</button>
     </div>
@@ -136,7 +136,7 @@ export default function SalesDashboard(props: Props) {
       <button onClick={() => setFilter("today")}><span>YOUR FOLLOW-THROUGHS</span><strong>{workspace ? due.length : "—"} <small>due now</small></strong><p>{due.filter(t => t.dueDate < today).length} overdue · keep the conversation moving</p></button>
       <button onClick={() => setFilter("upcoming")}><span>LOOKING AHEAD</span><strong>{workspace ? upcoming.length : "—"} <small>in the next 7 days</small></strong><p>Plan calls, samples and client check-ins</p></button>
       <button onClick={() => document.getElementById("crm-follow-ups")?.scrollIntoView({ behavior: "smooth", block: "start" })}><span>{props.scopeLabel.toUpperCase()}</span><strong>{loading ? "—" : followUps.length} <small>quotes to revisit</small></strong><p>Based on quote dates, not contact history</p></button>
-    </div>}
+    </div></>}
     <div className={styles.saveBar}>
       <span>{props.workspaceOnly ? "Your checklist and notes are private to your login." : "Tasks, pins and notes are personal to your login."}</span>
       <span role="status">{saving ? "Saving to your account…" : loadingWorkspace ? "Loading your workspace…" : dirty ? "Unsaved changes" : workspace ? savedAt ? `Saved at ${savedAt}` : "Saved to your account" : "Workspace unavailable"}</span>
