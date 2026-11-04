@@ -56,8 +56,11 @@ export function verifyStockOrderInput(input:StockOrderInput, manufacturerInvento
   if(input.notes && (typeof input.notes!=="string" || input.notes.length>4000))return "Notes must be under 4,000 characters.";
   if(!Array.isArray(input.lines)||input.lines.length===0||input.lines.length>150)return "Choose 1 to 150 inventory items.";
   const seen=new Set<string>();
+  const seenLines=new Set<string>();
   for(const line of input.lines) {
     if(!/^[a-f0-9-]{36}$/i.test(line.id))return "Invalid order line. Refresh and try again.";
+    if(seenLines.has(line.id))return "Duplicate stock PO line identifiers. Refresh and try again.";
+    seenLines.add(line.id);
     if(typeof line.inventory_item_id!=="string")return "Choose an inventory item for every line.";
     if(seen.has(line.inventory_item_id))return "An inventory item can appear only once per stock PO. Adjust its quantity instead.";
     seen.add(line.inventory_item_id);
