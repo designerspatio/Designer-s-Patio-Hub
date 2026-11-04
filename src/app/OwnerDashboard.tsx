@@ -12,6 +12,7 @@ type Props = Omit<OwnerInput,"today" | "purchaseOrders"> & {
   stockOrders: StockOrder[];
   stockReceived: StockOrderReceived;
   loadingStockOrders: boolean;
+  stockOrdersError: string;
   onStockOrders:()=>void;
   onStockOrder:(id:string)=>void;
   inventory: OwnerStockItem[];
@@ -124,6 +125,7 @@ export default function OwnerDashboard(props:Props) {
       summary={inventorySummary}
       loading={props.loadingInventory || props.loadingPurchases || props.loadingStockReceipts || props.loadingStockOrders}
       receiptsError={props.stockReceiptsError}
+      stockOrdersError={props.stockOrdersError}
       onInventory={props.onInventory}
       onPurchaseOrders={props.onPurchases}
       onPurchaseOrder={props.onPurchaseOrder}
