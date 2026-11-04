@@ -13,7 +13,7 @@ type VendorPayment = { id: string; vendor_invoice_id: string; manufacturer_id: s
 type Expense = { id: string; expense_date: string; amount: number; payee: string; category: string | null };
 type Receipt = { id: string; sales_order_id: string; payment_date: string; amount: number; payment_method: string; reference: string | null; posted: boolean; created_at: string; reversal_of_payment_id: string | null };
 type Props = {
-  mode: Exclude<DashboardMode, "sales">; firstName: string; supabase: SupabaseClient | null;
+  mode: Extract<DashboardMode, "payables" | "receivables">; firstName: string; supabase: SupabaseClient | null;
   sales: Sale[]; saleItems: Record<string, SaleItem[]>; invoices: Invoice[]; vendorPayments: VendorPayment[]; expenses: Expense[];
   clients: Record<string, string>; manufacturers: Record<string, string>;
   loadingSales: boolean; loadingAccounting: boolean;
