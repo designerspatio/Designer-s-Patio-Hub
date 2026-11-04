@@ -46,7 +46,6 @@ export default function StockPurchaseOrders(props:Props){
  const selected=props.orders.find(po=>po.id===selectedId)||null;
  const names=useMemo(()=>Object.fromEntries(props.manufacturers.map(m=>[m.id,m.name])),[props.manufacturers]);
  const vendorItems=useMemo(()=>props.inventory.filter(item=>item.active!==false&&item.manufacturer_id===draft.manufacturer_id)
-   .filter(item=>!`${item.name} ${item.sku||""}`.toLowerCase().includes("\u0000"))
    .filter(item=>!vendorItemSearch.trim() || `${item.name} ${item.sku||""}`.toLowerCase().includes(vendorItemSearch.trim().toLowerCase()))
    .sort((a,b)=>a.name.localeCompare(b.name)),[props.inventory,draft.manufacturer_id,vendorItemSearch]);
  const availableItems=vendorItems.filter(item=>!draft.lines.some(line=>line.inventory_item_id===item.id));
