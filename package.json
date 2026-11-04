@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
-    "test:crm": "node tests/crm-workspace.test.cjs"
+    "test:crm": "node tests/crm-workspace.test.cjs",
+    "test:stock": "node --test tests/stock-orders.test.cjs tests/owner-inventory.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
