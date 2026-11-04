@@ -187,15 +187,20 @@ async function receive(admin:SupabaseClient,bucket:Store,body:{
    let updated=false;
    for(let attempt=0;attempt<4&&!updated;attempt++){
     const {data:item,error:itemError}=await admin.from("inventory_items")
-      .select("id,quantity_on_hand,manufacturer_id,location,active,name").eq("id",line.inventory_item_id).maybeSingle();
+      .select("id,quantity_on_hand,manufacturer_id,location,active,name,unit_cost").eq("id",line.inventory_item_id).maybeSingle();
     if(itemError||!item||item.active===false)
      throw new HttpError(`Inventory item ${line.name} is missing or inactive. Receiving has stopped.`,409);
     if(item.manufacturer_id!==active.manufacturer_id)
      throw new HttpError(`Manufacturer mismatch for ${line.name}. Receiving has stopped.`,409);
     const before=number(item.quantity_on_hand),after=before+entry.quantity;
+    const oldCost=Math.max(0,number(item.unit_cost));
+    const lineCost=Math.max(0,number(line.unit_cost));
+    // Weighted average cost keeps the inventory valuation aligned with receipts
+    // while preserving the pre-existing on-hand cost basis.
+    const averageCost=Math.round(((Math.max(0,before)*oldCost)+(entry.quantity*lineCost))/Math.max(1,after)*100)/100;
     const {data:changed,error:updateError}=await admin.from("inventory_items")
-      .update({quantity_on_hand:after,updated_at:new Date().toISOString()})
-      .eq("id",item.id).eq("quantity_on_hand",before).select("id").maybeSingle();
+      .update({quantity_on_hand:after,unit_cost:averageCost,updated_at:new Date().toISOString()})
+      .eq("id",item.id).eq("quantity_on_hand",before).eq("unit_cost",item.unit_cost).select("id").maybeSingle();
     if(updateError)throw new HttpError(`Could not update stock quantity for ${line.name}.`,503);
     if(!changed)continue;
     const movement=await admin.from("inventory_movements").insert({
@@ -206,8 +211,8 @@ async function receive(admin:SupabaseClient,bucket:Store,body:{
     }).select("id").single();
     if(movement.error||!movement.data){
       const rollback=await admin.from("inventory_items")
-        .update({quantity_on_hand:before,updated_at:new Date().toISOString()})
-        .eq("id",item.id).eq("quantity_on_hand",after).select("id").maybeSingle();
+        .update({quantity_on_hand:before,unit_cost:oldCost,updated_at:new Date().toISOString()})
+        .eq("id",item.id).eq("quantity_on_hand",after).eq("unit_cost",averageCost).select("id").maybeSingle();
       if(rollback.error||!rollback.data)
        throw new HttpError(`URGENT: Inventory was incremented for ${line.name} but its receipt history failed and automatic reversal did not complete. Verify inventory quantity before another receipt.`,503);
       throw new HttpError(`Stock for ${line.name} could not be recorded in movement history. The quantity change was reversed.`,503);
