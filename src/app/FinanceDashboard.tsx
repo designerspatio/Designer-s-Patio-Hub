@@ -1,21 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dateAtOrAfter, numericAmount, remainingBalance, roundedMoney, type DashboardMode } from "./dashboardMode";
 import styles from "./FinanceDashboard.module.css";
+import { summarizeVendors, summarizeExpenseAccounts, validateExpenseAccount, expenseKey, type ExpenseAccount, type ExpenseAccountDraft } from "./financeAccounts";
 
 type Sale = { id: string; sale_number: number; client_id: string; status: string; order_date: string; freight_amount: number; adjustment_amount: number; tax_amount: number };
 type SaleItem = { quantity: number; unit_price: number };
 type Invoice = { id: string; invoice_number: number; vendor_invoice_number: string | null; manufacturer_id: string | null; invoice_date: string | null; due_date: string | null; status: string; total_amount: number };
 type VendorPayment = { id: string; vendor_invoice_id: string; payment_date: string; amount: number; payment_method: string | null; reference: string | null };
-type Expense = { id: string; expense_date: string; amount: number };
+type Expense = { id: string; expense_date: string; amount: number; payee: string; category: string | null };
 type Receipt = { id: string; sales_order_id: string; payment_date: string; amount: number; payment_method: string; reference: string | null; posted: boolean; created_at: string; reversal_of_payment_id: string | null };
 type Props = {
   mode: Exclude<DashboardMode, "sales">; firstName: string; supabase: SupabaseClient | null;
   sales: Sale[]; saleItems: Record<string, SaleItem[]>; invoices: Invoice[]; vendorPayments: VendorPayment[]; expenses: Expense[];
   clients: Record<string, string>; manufacturers: Record<string, string>;
   loadingSales: boolean; loadingAccounting: boolean;
+  expenseAccounts: ExpenseAccount[]; expenseAccountsLoading: boolean; expenseAccountsError: string;
+  onAddExpenseAccount: (draft: ExpenseAccountDraft) => Promise<{ok: boolean; error?: string}>;
+  onNewExpenseForAccount: (account: ExpenseAccount) => void;
   onSale: (id: string) => void; onInvoice: (id: string) => void;
   onSales: () => void; onDailyCash: () => void; onInvoices: () => void; onExpenses: () => void; onPurchases: () => void;
   onNewInvoice: () => void; onNewExpense: () => void; onRefresh: () => void | Promise<void>;
@@ -28,6 +32,11 @@ const amount = (value: number | null | undefined) => numericAmount(value);
 export default function FinanceDashboard(props: Props) {
   const { mode, supabase } = props;
   const [search, setSearch] = useState("");
+  const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
+  const [accountFormOpen, setAccountFormOpen] = useState(false);
+  const [accountDraft, setAccountDraft] = useState<ExpenseAccountDraft>({name:"",payee:"",category:""});
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [accountFormError, setAccountFormError] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [receiptsLoading, setReceiptsLoading] = useState(mode === "receivables");
   const [receiptsError, setReceiptsError] = useState("");
@@ -90,6 +99,8 @@ export default function FinanceDashboard(props: Props) {
     }).filter(row => row.balance > 0).sort((a, b) => b.balance - a.balance), [props.sales, props.saleItems, receiptTotals]);
   const saleById = useMemo(() => new Map(props.sales.map(sale => [sale.id, sale])), [props.sales]);
   const invoiceById = useMemo(() => new Map(props.invoices.map(invoice => [invoice.id, invoice])), [props.invoices]);
+  const vendorAccounts = useMemo(() => summarizeVendors(props.invoices, props.vendorPayments, props.manufacturers), [props.invoices, props.vendorPayments, props.manufacturers]);
+  const expenseSummaries = useMemo(() => summarizeExpenseAccounts(props.expenseAccounts, props.expenses, last30), [props.expenseAccounts, props.expenses, last30]);
   const query = search.trim().toLowerCase();
   const filteredBills = outstandingBills.filter(({ invoice }) => !query || [
     invoice.vendor_invoice_number, String(invoice.invoice_number), props.manufacturers[invoice.manufacturer_id || ""], invoice.status
@@ -107,6 +118,9 @@ export default function FinanceDashboard(props: Props) {
     payment.reference, payment.payment_method, payment.payment_date,
     props.manufacturers[invoiceById.get(payment.vendor_invoice_id)?.manufacturer_id || ""]
   ].join(" ").toLowerCase().includes(query));
+  const filteredVendorAccounts = vendorAccounts.filter(row => !query || row.name.toLowerCase().includes(query));
+  const filteredExpenseAccounts = expenseSummaries.filter(row => !query || [row.account.name,row.account.payee,row.account.category].join(" ").toLowerCase().includes(query));
+  const untrackedExpenses = props.expenses.filter(expense => !props.expenseAccounts.some(account => expenseKey(account.payee) === expenseKey(expense.payee) && expenseKey(account.category) === expenseKey(expense.category)));
   const ap = mode === "payables";
   const received30 = receipts.filter(payment => dateAtOrAfter(payment.payment_date, last30)).reduce((sum, payment) => sum + amount(payment.amount), 0);
   const receivedToday = receipts.filter(payment => payment.payment_date.slice(0, 10) === today).reduce((sum, payment) => sum + amount(payment.amount), 0);
@@ -114,16 +128,29 @@ export default function FinanceDashboard(props: Props) {
   const expenses30 = props.expenses.filter(expense => dateAtOrAfter(expense.expense_date, last30)).reduce((sum, expense) => sum + amount(expense.amount), 0);
   const billsDueSoon = outstandingBills.filter(row => row.invoice.due_date && row.invoice.due_date <= inSeven);
   const metrics = ap ? [
-    { label: "VENDOR BILLS OUTSTANDING", value: money(outstandingBills.reduce((sum, row) => sum + row.balance, 0)), detail: String(outstandingBills.length) + " unpaid invoices" },
+    { label: "OPEN VENDOR BALANCES", value: money(outstandingBills.reduce((sum, row) => sum + row.balance, 0)), detail: String(outstandingBills.length) + " unpaid invoices" },
     { label: "DUE / PAST DUE WITHIN 7 DAYS", value: String(billsDueSoon.length), detail: "Includes overdue vendor bills" },
     { label: "PAID TO VENDORS · 30 DAYS", value: money(paid30), detail: "Recorded vendor payments" },
     { label: "EXPENSES · 30 DAYS", value: money(expenses30), detail: "Recorded operating expenses" }
   ] : [
     { label: "RECEIVED TODAY", value: receiptsLoading || receiptsError ? "—" : money(receivedToday), detail: "Net customer payments" },
     { label: "MONEY IN · 30 DAYS", value: receiptsLoading || receiptsError ? "—" : money(received30), detail: "Net customer payment activity" },
-    { label: "OUTSTANDING RECEIVABLES", value: receiptsLoading || receiptsError || props.loadingSales ? "—" : money(salesBalances.reduce((sum, row) => sum + row.balance, 0)), detail: "Hub sales less recorded payments" },
+    { label: "OPEN BALANCES", value: receiptsLoading || receiptsError || props.loadingSales ? "—" : money(salesBalances.reduce((sum, row) => sum + row.balance, 0)), detail: "Hub sales less recorded payments" },
     { label: "SALES WITH BALANCES", value: receiptsLoading || receiptsError || props.loadingSales ? "—" : String(salesBalances.length), detail: "Sales orders awaiting payment" }
   ];
+
+  async function createAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const error = validateExpenseAccount(accountDraft, props.expenseAccounts);
+    if (error) { setAccountFormError(error); return; }
+    setSavingAccount(true); setAccountFormError("");
+    try {
+      const result = await props.onAddExpenseAccount(accountDraft);
+      if (!result.ok) {setAccountFormError(result.error || "Could not save account."); return;}
+      setAccountDraft({name:"",payee:"",category:""}); setAccountFormOpen(false);
+    } catch (error) {setAccountFormError(error instanceof Error ? error.message : "Could not save expense account.");}
+    finally {setSavingAccount(false);}
+  }
 
   async function refresh() {
     await props.onRefresh();
@@ -181,8 +208,8 @@ export default function FinanceDashboard(props: Props) {
         </section>
       </> : <>
         <section className={styles.panel}>
-          <div className={styles.heading}><div><div className={styles.kicker}>MONEY STILL COMING IN</div><h2>Outstanding customer balances</h2></div><button onClick={props.onSales}>View all sales →</button></div>
-          {receiptsLoading || props.loadingSales ? <p className={styles.empty}>Calculating sales balances…</p> : receiptsError ? <p className={styles.empty}>Payment history is needed before balances can be shown.</p> : filteredReceivables.length === 0 ? <p className={styles.empty}>No outstanding balances match your search.</p> :
+          <div className={styles.heading}><div><div className={styles.kicker}>MONEY STILL COMING IN</div><h2>Open customer balances</h2></div><button onClick={props.onSales}>View all sales →</button></div>
+          {receiptsLoading || props.loadingSales ? <p className={styles.empty}>Calculating sales balances…</p> : receiptsError ? <p className={styles.empty}>Payment history is needed before balances can be shown.</p> : filteredReceivables.length === 0 ? <p className={styles.empty}>No open balances match your search.</p> :
             filteredReceivables.slice(0, 12).map(({ sale, balance }) =>
               <button className={styles.record} key={sale.id} onClick={() => props.onSale(sale.id)}>
                 <div><strong>{props.clients[sale.client_id] || "Customer"} · Sale #{sale.sale_number}</strong><span>{sale.status} · {showDate(sale.order_date)}</span></div>
@@ -203,6 +230,53 @@ export default function FinanceDashboard(props: Props) {
           {filteredReceipts.length > 12 && <p className={styles.more}>Showing 12 of {filteredReceipts.length} matching payments. Search by payment reference to locate older records.</p>}
         </section>
       </>}
+    </div>
+    <div className={styles.accountGrids} id="finance-accounts">
+      <section className={styles.panel}>
+        <div className={styles.heading}><div><div className={styles.kicker}>ACCOUNTS BY MANUFACTURER</div><h2>Vendor & manufacturer accounts</h2></div><button onClick={props.onInvoices}>All vendor invoices →</button></div>
+        <p className={styles.info}>Invoiced, paid and open balances by manufacturer. Select a vendor to see its invoice records.</p>
+        {props.loadingAccounting ? <p className={styles.empty}>Loading vendor accounts…</p> : !filteredVendorAccounts.length ? <p className={styles.empty}>No vendors match your search.</p> :
+        <div className={styles.tableScroll}><table className={styles.ledgerTable}>
+          <thead><tr><th scope="col">Vendor</th><th scope="col">Invoiced</th><th scope="col">Paid</th><th scope="col">Open</th></tr></thead>
+          <tbody>{filteredVendorAccounts.map(row => <Fragment key={row.id}>
+            <tr><td><button type="button" className={styles.vendorButton} onClick={()=>setExpandedVendor(current=>current===row.id?null:row.id)} aria-expanded={expandedVendor===row.id}>{expandedVendor===row.id?"▾":"▸"} {row.name} <small>({row.invoices})</small></button></td>
+              <td>{money(row.invoiced)}</td><td>{money(row.paid)}</td><td className={styles.openValue}>{money(row.open)}</td></tr>
+            {expandedVendor===row.id && <tr className={styles.vendorDetail}><td colSpan={4}>
+              {props.invoices.filter(invoice => (invoice.manufacturer_id || "__unassigned__") === row.id && invoice.status!=="Void").length===0 ? <p>No invoice records for this vendor.</p> :
+              props.invoices.filter(invoice => (invoice.manufacturer_id || "__unassigned__") === row.id && invoice.status!=="Void").slice(0,30).map(invoice => {
+                const paid=props.vendorPayments.filter(payment=>payment.vendor_invoice_id===invoice.id).reduce((sum,payment)=>sum+amount(payment.amount),0);
+                return <button type="button" key={invoice.id} className={styles.invoiceLink} onClick={()=>props.onInvoice(invoice.id)}>
+                  <span>{invoice.vendor_invoice_number || "Invoice #"+invoice.invoice_number} · {invoice.status}</span>
+                  <span>Invoiced {money(amount(invoice.total_amount))} · Paid {money(paid)} · Open {money(invoice.status==="Paid"?0:remainingBalance(amount(invoice.total_amount),paid))}</span>
+                </button>;
+              })}
+              {props.invoices.filter(invoice => (invoice.manufacturer_id || "__unassigned__")===row.id && invoice.status!=="Void").length>30 && <p>Showing first 30 invoices. View Accounting for the full history.</p>}
+            </td></tr>}
+          </Fragment>)}</tbody>
+        </table></div>}
+      </section>
+      <section className={styles.panel}>
+        <div className={styles.heading}><div><div className={styles.kicker}>RECURRING OPERATING COSTS</div><h2>Expense accounts</h2></div>
+          <button onClick={()=>{setAccountFormOpen(value=>!value);setAccountFormError("");}} disabled={props.expenseAccountsLoading}>＋ Add account</button></div>
+        <p className={styles.info}>Create a tracked account such as Internet & Phone, with a payee like AT&T. Expense amounts with the same payee and category are grouped automatically.</p>
+        {props.expenseAccountsError && <p className={styles.warning} role="alert">{props.expenseAccountsError}</p>}
+        {accountFormOpen && <form className={styles.accountForm} onSubmit={event=>void createAccount(event)}>
+          <label>Account name<input required maxLength={100} value={accountDraft.name} placeholder="Internet & Phone" onChange={event=>setAccountDraft(value=>({...value,name:event.target.value}))}/></label>
+          <label>Company / payee<input required maxLength={120} value={accountDraft.payee} placeholder="AT&T Business" onChange={event=>setAccountDraft(value=>({...value,payee:event.target.value}))}/></label>
+          <label>Expense category<input required maxLength={100} value={accountDraft.category} placeholder="Telecommunications" onChange={event=>setAccountDraft(value=>({...value,category:event.target.value}))}/></label>
+          <div className={styles.formActions}><button className={styles.primary} type="submit" disabled={savingAccount}>{savingAccount?"Saving…":"Save shared account"}</button><button type="button" onClick={()=>{setAccountFormOpen(false);setAccountFormError("");}}>Cancel</button></div>
+          {accountFormError && <p role="alert" className={styles.warning}>{accountFormError}</p>}
+        </form>}
+        {props.expenseAccountsLoading ? <p className={styles.empty}>Loading shared accounts…</p> : !filteredExpenseAccounts.length ? <p className={styles.empty}>No expense accounts match your search. Add your first account above.</p> :
+        <div className={styles.expenseAccountList}>{filteredExpenseAccounts.map(({account,totalPaid,last30,payments})=>
+          <div className={styles.expenseAccount} key={account.id}>
+            <div><strong>{account.name}</strong><span>{account.payee} · {account.category}</span><span>{payments} expense record{payments===1?"":"s"} · Total {money(totalPaid)}</span></div>
+            <div className={styles.end}><strong>{money(last30)}</strong><span>Last 30 days</span><button type="button" onClick={()=>props.onNewExpenseForAccount(account)}>＋ Record expense</button></div>
+          </div>
+        )}</div>}
+        {untrackedExpenses.length>0 && <p className={styles.info}>{untrackedExpenses.length} existing expense record{untrackedExpenses.length===1?"":"s"} not matched to a saved account ({money(untrackedExpenses.reduce((sum,x)=>sum+amount(x.amount),0))}). Add accounts using those payee and category details if you want to group them.</p>}
+        <button type="button" onClick={props.onExpenses}>View all expense records →</button>
+      </section>
     </div>
     <p className={styles.footnote}>Figures are calculated from the Hub's available records, not a bank statement. Use Accounting and Daily Cash for reconciliation. Dashboard shortcuts do not change user permissions.</p>
   </div>;
