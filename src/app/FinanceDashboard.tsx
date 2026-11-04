@@ -9,7 +9,7 @@ import { summarizeVendors, summarizeExpenseAccounts, validateExpenseAccount, exp
 type Sale = { id: string; sale_number: number; client_id: string; status: string; order_date: string; freight_amount: number; adjustment_amount: number; tax_amount: number };
 type SaleItem = { quantity: number; unit_price: number };
 type Invoice = { id: string; invoice_number: number; vendor_invoice_number: string | null; manufacturer_id: string | null; invoice_date: string | null; due_date: string | null; status: string; total_amount: number };
-type VendorPayment = { id: string; vendor_invoice_id: string; payment_date: string; amount: number; payment_method: string | null; reference: string | null };
+type VendorPayment = { id: string; vendor_invoice_id: string; manufacturer_id: string | null; payment_date: string; amount: number; payment_method: string | null; reference: string | null };
 type Expense = { id: string; expense_date: string; amount: number; payee: string; category: string | null };
 type Receipt = { id: string; sales_order_id: string; payment_date: string; amount: number; payment_method: string; reference: string | null; posted: boolean; created_at: string; reversal_of_payment_id: string | null };
 type Props = {
