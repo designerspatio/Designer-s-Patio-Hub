@@ -3,9 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const { stripTypeScriptTypes } = require("node:module");
-const source=stripTypeScriptTypes(fs.readFileSync("src/app/ownerInventory.ts","utf8"),{mode:"transform"}).replace(/export /g,"");
+const source=stripTypeScriptTypes(fs.readFileSync("src/app/ownerInventory.ts","utf8"),{mode:"transform"}).replace(/^import .*?;\n/gm,"").replace(/export /g,"");
+const stockSource=stripTypeScriptTypes(fs.readFileSync("src/app/stockOrders.ts","utf8"),{mode:"transform"}).replace(/export /g,"");
 const context={module:{exports:{}}};
-vm.runInNewContext(source+"\nmodule.exports={summarizeOwnerInventory,isIncomingStockPO};",context);
+vm.runInNewContext(stockSource+"\n"+source+"\nmodule.exports={summarizeOwnerInventory,isIncomingStockPO};",context);
 const {summarizeOwnerInventory,isIncomingStockPO}=context.module.exports;
 const inventory=[
   {id:"a",quantity_on_hand:4,unit_cost:125,active:true},
