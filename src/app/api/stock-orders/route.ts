@@ -223,7 +223,7 @@ async function receive(admin:SupabaseClient,bucket:Store,body:{
    }
    if(!updated)throw new HttpError(`Inventory for ${line.name} was edited concurrently. Retry receiving.`,409);
   }
-  return response({ok:true,received:await readReceipts(admin),completed,order_id:order.id},200);
+  return response({ok:true,received:history,completed,order_id:order.id},200);
  }catch(error){
   const detail=error instanceof Error?error.message:"Unexpected stock receiving error.";
   if(completed.length) return response({error:`${detail} Some items were received successfully. Refresh the order before receiving again.`,completed,partial:true},409);
@@ -267,7 +267,8 @@ export async function POST(request:Request) {
    const {data:created,error}=await admin.from("inventory_items").insert({
     name:item.name.trim(),manufacturer_id:item.manufacturer_id,sku:String(item.sku||"").trim()||null,
     description:String(item.description||"").trim()||null,location:String(item.location||"").trim()||null,
-    unit_cost:number(item.unit_cost),msrp:number(item.msrp),quantity_on_hand:0,active:true
+    unit_cost:number(item.unit_cost),msrp:number(item.msrp),quantity_on_hand:0,active:true,
+    updated_at:new Date().toISOString()
    }).select("id,name,sku,manufacturer_id,unit_cost,quantity_on_hand,active,location").single();
    if(error||!created)throw new HttpError(`Could not create inventory item: ${error?.message||"unknown error"}`,503);
    return response({item:created},201);
