@@ -2330,6 +2330,9 @@ export default function Home() {
     useState("");
 
   const [clients, setClients] = useState<Client[]>([]);
+  // Additional team members are distinct from the primary salesperson.
+  const [clientAdditionalSalespeople, setClientAdditionalSalespeople] = useState<Record<string, string[]>>({});
+  const [clientAdditionalSelection, setClientAdditionalSelection] = useState<string[]>([]);
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [quoteItemsSummary, setQuoteItemsSummary] =
@@ -3015,6 +3018,37 @@ export default function Home() {
       setClientsLoading(false);
     }
   }, [supabase, session?.user?.id]);
+
+  const loadClientSalespeople = useCallback(async () => {
+    if (!session?.user?.id || !session.access_token) { setClientAdditionalSalespeople({}); return; }
+    try {
+      const response = await fetch("/api/client-salespeople", {
+        headers: { Authorization: "Bearer " + session.access_token }, cache: "no-store"
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not load additional salespeople.");
+      setClientAdditionalSalespeople(body.assignments || {});
+    } catch (error) {
+      setMessage("Shared client assignments: " + (error instanceof Error ? error.message : "Unable to load."));
+    }
+  }, [session?.user?.id, session?.access_token]);
+
+  async function saveClientSalespeople(clientId: string, primaryId: string | null) {
+    if (!supabase) throw new Error("Hub connection unavailable.");
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new Error("Please sign in again.");
+    const ids = [...new Set(clientAdditionalSelection)].filter(id => id !== primaryId);
+    const response = await fetch("/api/client-salespeople", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, additional_user_ids: ids })
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Unable to save shared assignments.");
+    setClientAdditionalSalespeople(current => ({ ...current, [clientId]: ids }));
+    setClientAdditionalSelection(ids);
+  }
 
   const loadManufacturers = useCallback(async () => {
     if (!supabase || !session?.user?.id) {
@@ -3932,6 +3966,7 @@ export default function Home() {
     loadProfile();
     loadTeam();
     loadClients();
+    loadClientSalespeople();
     loadManufacturers();
     loadQuotes();
     loadSalesOrders();
@@ -3947,6 +3982,7 @@ export default function Home() {
     loadProfile,
     loadTeam,
     loadClients,
+    loadClientSalespeople,
     loadManufacturers,
     loadQuotes,
     loadSalesOrders,
@@ -4119,9 +4155,19 @@ export default function Home() {
 
   // Keep the full fetched arrays for relationships and editing. Scope only
   // directory views and their totals; Supabase remains the access authority.
+  const clientMatchesScope = useCallback((client: Client) => {
+    const ids = [client.assigned_user_id, ...(clientAdditionalSalespeople[client.id] || [])]
+      .filter((id): id is string => Boolean(id));
+    if (!session?.user?.id) return false;
+    if (recordScope === "mine") return ids.includes(session.user.id);
+    if (!scopeSalespersonId) return true;
+    if (scopeSalespersonId === "__unassigned__") return ids.length === 0;
+    return ids.includes(scopeSalespersonId);
+  }, [clientAdditionalSalespeople, recordScope, session?.user?.id, scopeSalespersonId]);
+
   const scopedClients = useMemo(() => clients.filter((client) =>
-    (client.active !== false) && matchesRecordScope(client.assigned_user_id, recordScope, session?.user?.id, scopeSalespersonId)
-  ), [clients, recordScope, session?.user?.id, scopeSalespersonId]);
+    client.active !== false && clientMatchesScope(client)
+  ), [clients, clientMatchesScope]);
   const scopedQuotes = useMemo(() => quotes.filter((quote) =>
     matchesRecordScope(quote.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
   ), [quotes, recordScope, session?.user?.id, scopeSalespersonId]);
@@ -4138,13 +4184,13 @@ export default function Home() {
   const filteredClients = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    const directoryClients = clientArchiveView ? clients.filter(client => client.active === false && matchesRecordScope(client.assigned_user_id, recordScope, session?.user?.id, scopeSalespersonId)) : scopedClients;
+    const directoryClients = clientArchiveView ? clients.filter(client => client.active === false && clientMatchesScope(client)) : scopedClients;
     if (!term) return directoryClients;
 
     return directoryClients.filter((client) => {
-      const salesperson =
-        team.find((person) => person.id === client.assigned_user_id)
-          ?.display_name || "";
+      const salesperson = [client.assigned_user_id, ...(clientAdditionalSalespeople[client.id] || [])]
+        .map(id => team.find(person => person.id === id)?.display_name || "")
+        .join(" ");
 
       const searchable = [
         getClientName(client),
@@ -4162,7 +4208,7 @@ export default function Home() {
 
       return searchable.includes(term);
     });
-  }, [scopedClients, clients, clientArchiveView, recordScope, scopeSalespersonId, session?.user?.id, search, team]);
+  }, [scopedClients, clients, clientArchiveView, clientMatchesScope, clientAdditionalSalespeople, search, team]);
 
   const filteredAdminTeam = useMemo(() => {
     const term =
@@ -4895,6 +4941,10 @@ export default function Home() {
     if (!id) return "Unassigned";
     return team.find((person) => person.id === id)?.display_name || "Assigned";
   }
+  function clientSalespeopleNames(client: Client) {
+    const ids = [...new Set([client.assigned_user_id, ...(clientAdditionalSalespeople[client.id] || [])].filter(Boolean))];
+    return ids.length ? ids.map(id => salespersonName(id)).join(", ") : "Unassigned";
+  }
 
   async function signIn() {
     if (!supabase) return;
@@ -4960,6 +5010,8 @@ export default function Home() {
     setTeamAdminForm(blankTeamAdminForm);
     setTeamTemporaryPassword("");
     setClients([]);
+    setClientAdditionalSalespeople({});
+    setClientAdditionalSelection([]);
     setQboConnectionStatus(null);
     setQboConnectionLoading(false);
     setQboSetupItems([]);
@@ -6120,6 +6172,7 @@ export default function Home() {
   async function openClient(client: Client) {
     setSelectedClient(client);
     setClientForm(clientToForm(client));
+    setClientAdditionalSelection(clientAdditionalSalespeople[client.id] || []);
     resetQboClientSyncState();
     setClientMode("view");
     setClientModalOpen(true);
@@ -6139,6 +6192,7 @@ export default function Home() {
 
   function openNewClient() {
     setSelectedClient(null);
+    setClientAdditionalSelection([]);
     resetQboClientSyncState();
     setClientDocuments([]);
     setClientDocumentFile(null);
@@ -6157,6 +6211,7 @@ export default function Home() {
   function beginEdit() {
     if (!selectedClient) return;
     setClientForm(clientToForm(selectedClient));
+    setClientAdditionalSelection(clientAdditionalSalespeople[selectedClient.id] || []);
     setClientMode("edit");
   }
 
@@ -6200,6 +6255,7 @@ export default function Home() {
     setSavingClient(true);
     setMessage("");
 
+    let savedClientId: string | null = null;
     const payload = {
       client_name: cleanName,
       phone: clientForm.phone.trim() || null,
@@ -6228,6 +6284,7 @@ export default function Home() {
         return;
       }
 
+      savedClientId = (data as Client).id;
       setSelectedClient(data as Client);
       setClientMode("view");
       setClientForm(clientToForm(data as Client));
@@ -6249,12 +6306,21 @@ export default function Home() {
         return;
       }
 
+      savedClientId = (data as Client).id;
       setSelectedClient(data as Client);
       setClientMode("view");
       setClientForm(clientToForm(data as Client));
       setMessage(`${cleanName} was updated.`);
     }
 
+    if (savedClientId) {
+      try {
+        await saveClientSalespeople(savedClientId, clientForm.assigned_user_id || null);
+      } catch (error) {
+        setMessage(cleanName + " saved, but additional salespeople were NOT saved: " +
+          (error instanceof Error ? error.message : "Please try again."));
+      }
+    }
     await loadClients();
     setSavingClient(false);
   }
@@ -21306,9 +21372,9 @@ export default function Home() {
                         </div>
 
                         <div className="client-row-sales">
-                          <span>Salesperson</span>
+                          <span>Salespeople</span>
                           <strong>
-                            {salespersonName(client.assigned_user_id)}
+                            {clientSalespeopleNames(client)}
                           </strong>
                         </div>
 
@@ -22806,11 +22872,16 @@ export default function Home() {
 
                 <div className="detail-grid">
                   <DetailField
-                    label="Salesperson"
-                    value={salespersonName(
-                      selectedClient.assigned_user_id
-                    )}
+                    label="Primary salesperson"
+                    value={salespersonName(selectedClient.assigned_user_id)}
                   />
+                  {(clientAdditionalSalespeople[selectedClient.id] || []).length > 0 && (
+                    <DetailField
+                      label="Additional salespeople"
+                      value={(clientAdditionalSalespeople[selectedClient.id] || [])
+                        .map(id => salespersonName(id)).join(", ")}
+                    />
+                  )}
 
                   <DetailField
                     label="Phone"
@@ -23413,7 +23484,7 @@ export default function Home() {
                     />
                   </FormField>
 
-                  <FormField label="Salesperson" wide>
+                  <FormField label="Primary salesperson" wide>
                     <select
                       value={clientForm.assigned_user_id}
                       onChange={(e) =>
@@ -23431,6 +23502,22 @@ export default function Home() {
                       ))}
                     </select>
                   </FormField>
+
+                  <FormField label="Additional salespeople" wide>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", padding: "8px 0" }}>
+                      {team.filter(person => person.id !== clientForm.assigned_user_id).map(person => (
+                        <label key={person.id} style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                          <input type="checkbox"
+                            checked={clientAdditionalSelection.includes(person.id)}
+                            onChange={e => setClientAdditionalSelection(current =>
+                              e.target.checked ? [...new Set([...current, person.id])] : current.filter(id => id !== person.id))} />
+                          {person.display_name}
+                        </label>
+                      ))}
+                    </div>
+                    <small>Shared clients appear under multiple salespeople. Primary salesperson remains the default for quotes and sales.</small>
+                  </FormField>
+
 
                   <FormField label="Phone">
                     <input
@@ -23544,6 +23631,7 @@ export default function Home() {
                       if (clientMode === "edit" && selectedClient) {
                         setClientMode("view");
                         setClientForm(clientToForm(selectedClient));
+                        setClientAdditionalSelection(clientAdditionalSalespeople[selectedClient.id] || []);
                       } else {
                         closeClientModal();
                       }
