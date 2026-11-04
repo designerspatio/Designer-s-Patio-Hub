@@ -10,6 +10,7 @@ import ExpenseCsvPanel from "./ExpenseCsvPanel";
 import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
+import OwnerDashboard from "./OwnerDashboard";
 import { type ExpenseAccount, type ExpenseAccountDraft, expenseKey } from "./financeAccounts";
 import { dashboardModeForProfile } from "./dashboardMode";
 import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
@@ -4040,6 +4041,16 @@ export default function Home() {
     loadPriceLists,
     loadAcknowledgementLibrary,
   ]);
+
+  useEffect(() => {
+    if (!session?.user?.id || profile?.role !== "Owner" || view !== "dashboard") return;
+    const refreshBusiness = () => {
+      void Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadAccounting()]);
+    };
+    const timer = window.setInterval(refreshBusiness, 300000);
+    window.addEventListener("focus", refreshBusiness);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshBusiness); };
+  }, [session?.user?.id, profile?.role, view, loadSalesOrders, loadQuotes, loadPurchaseOrders, loadAccounting]);
 
   useEffect(() => {
     if (!profile?.id || !session?.user?.id) return;
@@ -18466,7 +18477,7 @@ export default function Home() {
                 }}
               >
                 <span>⌂</span>
-                Dashboard
+                 {dashboardMode === "owner" ? "Owner Dashboard" : "Dashboard"}
               </button>
             </div>
 
@@ -18700,7 +18711,7 @@ export default function Home() {
             <div>
               <div className="topbar-title">
                 {view === "dashboard"
-                  ? "Dashboard"
+                  ? dashboardMode === "owner" ? "Owner Dashboard" : "Dashboard"
                   : view === "clients"
                   ? "Clients"
                   : view === "scan"
@@ -21244,7 +21255,31 @@ export default function Home() {
 
 
           <div hidden={view !== "dashboard"}>
-            {dashboardMode === "sales" ? <SalesDashboard
+            {(dashboardMode === "sales" || dashboardMode === "owner") ? <>
+              {dashboardMode === "owner" && <OwnerDashboard
+                firstName={firstName}
+                sales={salesOrders}
+                saleItems={salesItemsSummary}
+                quotes={quotes}
+                quoteItems={quoteItemsSummary}
+                purchaseOrders={purchaseOrders}
+                invoices={vendorInvoices}
+                vendorPayments={vendorPayments}
+                team={team}
+                manufacturers={manufacturers}
+                loadingSales={salesLoading}
+                loadingQuotes={quotesLoading}
+                loadingPurchases={purchaseOrdersLoading}
+                loadingAccounting={accountingLoading}
+                onRefresh={async () => { await Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadAccounting()]); }}
+                onSales={() => { setView("sales"); setRecordScope("all"); setScopeSalespersonId(""); }}
+                onQuotes={() => { setView("quotes"); setRecordScope("all"); setScopeSalespersonId(""); }}
+                onPurchases={() => { setView("purchase_orders"); setRecordScope("all"); setScopeSalespersonId(""); }}
+                onAccounting={() => { setView("accounting"); setAccountingSection("invoices"); }}
+                onReports={() => setView("reports")}
+              />}
+              <SalesDashboard
+              workspaceOnly={dashboardMode === "owner"}
               key={session.user.id}
               userId={session.user.id}
               firstName={firstName}
@@ -21262,7 +21297,7 @@ export default function Home() {
               onScan={() => setView("scan")}
               onClients={() => setView("clients")}
               onQuotes={() => setView("quotes")}
-            /> : <FinanceDashboard
+            /></> : <FinanceDashboard
               key={session.user.id + "-" + dashboardMode}
               mode={dashboardMode}
               firstName={firstName}
