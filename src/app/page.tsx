@@ -21360,6 +21360,7 @@ export default function Home() {
                 stockOrders={stockOrders}
                 stockReceived={stockReceived}
                 loadingStockOrders={stockOrdersLoading}
+                stockOrdersError={stockOrdersError}
                 inventory={inventoryItems}
                 purchaseOrderItems={purchaseOrderItemsSummary}
                 stockReceipts={ownerStockReceipts}
