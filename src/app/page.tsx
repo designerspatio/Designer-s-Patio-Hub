@@ -9,6 +9,8 @@ import ExpenseCsvPanel from "./ExpenseCsvPanel";
 
 import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
+import FinanceDashboard from "./FinanceDashboard";
+import { dashboardModeForProfile } from "./dashboardMode";
 import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
 import { matchesRecordScope, type RecordScope } from "./recordScope";
 import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
@@ -18373,6 +18375,8 @@ export default function Home() {
     session.user.email ||
     "there";
 
+  const dashboardMode = dashboardModeForProfile(profile);
+
   return (
     <>
       <style>{appCss}</style>
@@ -18691,7 +18695,7 @@ export default function Home() {
             </div>
           </header>
 
-          {["dashboard", "clients", "quotes", "sales", "purchase_orders"].includes(view) && (
+          {(view === "dashboard" ? dashboardMode === "sales" : ["clients", "quotes", "sales", "purchase_orders"].includes(view)) && (
             <section className="record-scope-bar" aria-label="Record access">
               <div>
                 <strong>{recordScope === "mine" ? "My Records" : "All Access"}</strong>
@@ -21189,7 +21193,7 @@ export default function Home() {
 
 
           <div hidden={view !== "dashboard"}>
-            <SalesDashboard
+            {dashboardMode === "sales" ? <SalesDashboard
               key={session.user.id}
               userId={session.user.id}
               firstName={firstName}
@@ -21207,7 +21211,31 @@ export default function Home() {
               onScan={() => setView("scan")}
               onClients={() => setView("clients")}
               onQuotes={() => setView("quotes")}
-            />
+            /> : <FinanceDashboard
+              key={session.user.id + "-" + dashboardMode}
+              mode={dashboardMode}
+              firstName={firstName}
+              supabase={supabase}
+              sales={salesOrders}
+              saleItems={salesItemsSummary}
+              invoices={vendorInvoices}
+              vendorPayments={vendorPayments}
+              expenses={expenses}
+              clients={Object.fromEntries(clients.map(client => [client.id, getClientName(client)]))}
+              manufacturers={Object.fromEntries(manufacturers.map(manufacturer => [manufacturer.id, manufacturer.name]))}
+              loadingSales={salesLoading}
+              loadingAccounting={accountingLoading}
+              onSale={id => { const sale = salesOrders.find(item => item.id === id); if (sale) void openSale(sale); }}
+              onInvoice={id => { const invoice = vendorInvoices.find(item => item.id === id); if (invoice) void openVendorInvoice(invoice); }}
+              onSales={() => { setView("sales"); setRecordScope("all"); setScopeSalespersonId(""); }}
+              onDailyCash={() => setView("daily_cash")}
+              onInvoices={() => { setView("accounting"); setAccountingSection("invoices"); setAccountingSearch(""); }}
+              onExpenses={() => { setView("accounting"); setAccountingSection("expenses"); setAccountingSearch(""); }}
+              onPurchases={() => { setView("purchase_orders"); setRecordScope("all"); setScopeSalespersonId(""); }}
+              onNewInvoice={() => { setView("accounting"); setAccountingSection("invoices"); openNewVendorInvoice(); }}
+              onNewExpense={() => { setView("accounting"); setAccountingSection("expenses"); openNewExpense(); }}
+              onRefresh={async () => { await Promise.all([loadSalesOrders(), loadAccounting(), loadDailyCashBatches()]); }}
+            />}
           </div>
 
           {view === "scan" && (
