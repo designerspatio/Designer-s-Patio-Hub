@@ -31,7 +31,7 @@ export type StockOrderReceived = Record<string,number>;
 export type StockReceiptInput = {line_id:string; quantity:number};
 export const stockRef = (sequence:number) => "STK-" + String(sequence).padStart(4,"0");
 export const stockLineMarker = (orderId:string,lineId:string) => "stock-po:" + orderId + ":" + lineId;
-export const stockReceiptReason = (receiptId:string) => "Stock receipt " + receiptId;
+export const stockReceiptReason = (receiptId:string, sequence?:number) => sequence ? stockRef(sequence) + " · Receipt " + receiptId : "Stock receipt " + receiptId;
 const asNumber = (v:unknown) => Number.isFinite(Number(v)) ? Number(v) : 0;
 export const isStockOrderLocked = (order:StockOrder) => order.status !== "Draft";
 export function receivedForLine(line:StockOrderLine,received:StockOrderReceived) {
