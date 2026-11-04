@@ -12,6 +12,7 @@ import SalesDashboard from "./SalesDashboard";
 import ClientCsvPanel, { fetchAllClients } from "./ClientCsvPanel";
 import { matchesRecordScope, type RecordScope } from "./recordScope";
 import { DP_PDF_LOGO_DATA_URL } from "./PdfBranding";
+import { pdfTextWidth as helveticaTextWidth, wrapPdfWidth as helveticaWrap } from "./pdfTextLayout";
 import {
   useCallback,
   useEffect,
@@ -6893,33 +6894,17 @@ export default function Home() {
   }
 
   function pdfTextWidth(value: string, size: number, bold = false) {
-    return pdfSafe(value).length * size * (bold ? 0.56 : 0.51);
+    return helveticaTextWidth(pdfSafe(value), size, bold);
   }
 
-  function wrapPdfWidth(
-    value: string,
-    maxWidth: number,
-    size: number,
-    bold = false
-  ) {
-    const words = pdfSafe(value).split(/\s+/).filter(Boolean);
-    if (words.length === 0) return [""];
+  function wrapPdfWidth(value: string, maxWidth: number, size: number, bold = false) {
+    return helveticaWrap(pdfSafe(value), maxWidth, size, bold);
+  }
 
-    const lines: string[] = [];
-    let current = words[0];
-
-    for (const word of words.slice(1)) {
-      const candidate = `${current} ${word}`;
-      if (pdfTextWidth(candidate, size, bold) <= maxWidth) {
-        current = candidate;
-      } else {
-        lines.push(current);
-        current = word;
-      }
-    }
-
-    lines.push(current);
-    return lines;
+  // Numeric values should shrink only if a number is unusually wide.
+  function fitPdfSize(value: string, maxWidth: number, preferredSize: number, bold = false) {
+    const actualWidth = pdfTextWidth(value, preferredSize, bold);
+    return actualWidth > maxWidth ? preferredSize * maxWidth / actualWidth : preferredSize;
   }
 
   function base64ToBinary(value: string) {
@@ -7261,6 +7246,18 @@ export default function Home() {
     fieldLine(326, 342, "Delivery notes", quoteForm.delivery_notes || "-", 404, 172);
 
     let cursorTop = 375;
+
+    // Customer PO is also used for project references in the quote editor.
+    // Include it on the customer-facing document, above the merchandise grid.
+    const projectReference = (quoteForm.customer_po || selectedQuote.customer_po || "").trim();
+    if (projectReference) {
+      const projectLines = wrapPdfWidth(projectReference, PAGE_W - 170, 7.4, true);
+      textAt(36, 365, "PROJECT / PO", 7.2, true, NAVY);
+      projectLines.forEach((entry, index) => {
+        textAt(130, 365 + index * 10, entry, 7.4, false, DARK);
+      });
+      cursorTop = 385 + projectLines.length * 10;
+    }
 
     const col = {
       x: 32,
@@ -7885,6 +7882,16 @@ export default function Home() {
     fieldLine(326, 342, "Delivery notes", salesPdfForm.delivery_notes || "-", 404, 172);
 
     let cursorTop = 375;
+
+    const projectReference = (selectedSale.customer_po || "").trim();
+    if (projectReference) {
+      const projectLines = wrapPdfWidth(projectReference, PAGE_W - 170, 7.4, true);
+      textAt(36, 365, "PROJECT / PO", 7.2, true, NAVY);
+      projectLines.forEach((entry, index) => {
+        textAt(130, 365 + index * 10, entry, 7.4, false, DARK);
+      });
+      cursorTop = 385 + projectLines.length * 10;
+    }
 
     const col = {
       x: 32,
