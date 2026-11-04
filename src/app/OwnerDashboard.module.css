@@ -98,3 +98,12 @@
 .inventoryFootnote { color:#8a9ca9; font-size:10.5px; line-height:1.75; margin:15px 0 0; }
 @media(max-width:1000px) { .inventoryMetrics {grid-template-columns:repeat(2,minmax(0,1fr));} .inventoryHeading {flex-direction:column;} }
 @media(max-width:650px) { .inventoryMetrics {grid-template-columns:1fr;} .stockVendorTotals > div {grid-template-columns:1fr;} }
+
+
+.vendorCommitmentStrip { margin-top:16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:15px; }
+.vendorCommitmentStrip h2 { margin:5px 0; }
+.vendorCommitmentNumbers { display:flex; flex:1; justify-content:space-evenly; gap:15px; flex-wrap:wrap; min-width:280px; }
+.vendorCommitmentNumbers > div { display:flex; flex-direction:column; gap:6px; padding:5px; }
+.vendorCommitmentNumbers span { color:#71879a; font-size:10.5px; }
+.vendorCommitmentNumbers strong { color:#234b70; font-weight:800; font-size:16px; font-variant-numeric:tabular-nums; }
+@media(max-width:650px) { .vendorCommitmentNumbers {justify-content:space-between;} }
