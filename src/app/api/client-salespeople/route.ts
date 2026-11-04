@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     const { data: client, error: clientError } = await admin.from("clients")
       .select("id,assigned_user_id").eq("id", clientId).single();
     if (clientError || !client) throw new RequestError("The selected client could not be found.", 404);
-    if (uniqueIds.includes(client.assigned_user_id)) throw new RequestError("The primary salesperson cannot also be an additional salesperson.", 400);
+    if (client.assigned_user_id && uniqueIds.includes(client.assigned_user_id)) throw new RequestError("The primary salesperson cannot also be an additional salesperson.", 400);
     if (uniqueIds.length) {
       const { data: profiles, error: profilesError } = await admin.from("profiles")
         .select("id,active").in("id", uniqueIds);
