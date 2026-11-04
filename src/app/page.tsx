@@ -29871,6 +29871,7 @@ export default function Home() {
                       onChange={event => {
                         const account = expenseAccounts.find(item => item.id === event.target.value);
                         if (account) setExpenseForm(current => ({...current,payee:account.payee,category:account.category}));
+                        else setExpenseForm(current => ({...current,category:""}));
                       }}
                     >
                       <option value="">No tracked account / custom expense</option>
