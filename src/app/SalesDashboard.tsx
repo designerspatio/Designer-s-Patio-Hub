@@ -12,6 +12,7 @@ type Props = {
   userId: string; firstName: string; supabase: SupabaseClient | null;
   clients: Contact[]; allClients: Contact[]; quotes: Quote[]; loading: boolean; scopeLabel: string;
   onDirtyChange?: (dirty: boolean) => void;
+  workspaceOnly?: boolean;
   onClient: (id: string) => void; onQuote: (id: string) => void;
   onNewClient: () => void; onNewQuote: () => void; onScan: () => void; onClients: () => void; onQuotes: () => void;
 };
@@ -122,12 +123,12 @@ export default function SalesDashboard(props: Props) {
     setPinChoice("");
   }
   return <div className={styles.dashboard}>
-    <header className={styles.welcome}>
+    {!props.workspaceOnly && <header className={styles.welcome}>
       <div><div className={styles.eyebrow}>YOUR RELATIONSHIP DESK</div><h1>Good to see you, {props.firstName}.</h1>
         <p>A little organization. A timely follow-up. A stronger client relationship.</p></div>
       <div className={styles.date}>{new Date(`${today}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}<span>Make room for your next great conversation.</span></div>
-    </header>
-    <div className={styles.quickActions} aria-label="Sales shortcuts">
+    </header>}
+    {!props.workspaceOnly && <div className={styles.quickActions} aria-label="Sales shortcuts">
       <button className={styles.primary} onClick={props.onNewQuote}>＋ New quote</button>
       <button onClick={props.onNewClient}>＋ New client</button><button onClick={props.onScan}>Scan a badge</button><button onClick={props.onClients}>Find a client →</button>
     </div>
@@ -135,9 +136,9 @@ export default function SalesDashboard(props: Props) {
       <button onClick={() => setFilter("today")}><span>YOUR FOLLOW-THROUGHS</span><strong>{workspace ? due.length : "—"} <small>due now</small></strong><p>{due.filter(t => t.dueDate < today).length} overdue · keep the conversation moving</p></button>
       <button onClick={() => setFilter("upcoming")}><span>LOOKING AHEAD</span><strong>{workspace ? upcoming.length : "—"} <small>in the next 7 days</small></strong><p>Plan calls, samples and client check-ins</p></button>
       <button onClick={() => document.getElementById("crm-follow-ups")?.scrollIntoView({ behavior: "smooth", block: "start" })}><span>{props.scopeLabel.toUpperCase()}</span><strong>{loading ? "—" : followUps.length} <small>quotes to revisit</small></strong><p>Based on quote dates, not contact history</p></button>
-    </div>
+    </div>}
     <div className={styles.saveBar}>
-      <span>Tasks, pins and notes are personal to your login.</span>
+      <span>{props.workspaceOnly ? "Your checklist and notes are private to your login." : "Tasks, pins and notes are personal to your login."}</span>
       <span role="status">{saving ? "Saving to your account…" : loadingWorkspace ? "Loading your workspace…" : dirty ? "Unsaved changes" : workspace ? savedAt ? `Saved at ${savedAt}` : "Saved to your account" : "Workspace unavailable"}</span>
     </div>
     {error && <div className={styles.error} role="alert"><div>{error}</div><div className={styles.inlineActions}>
@@ -185,6 +186,7 @@ export default function SalesDashboard(props: Props) {
         <label className={styles.noteLabel}>Your notes<textarea aria-label="Your personal notepad" maxLength={20000} disabled={disabled} value={workspace?.note || ""} placeholder={'Things to remember…\n\n• Fabric samples to pull\n• Questions for a vendor\n• Ideas for a client’s space'} onChange={e => { if (workspace) { const next = { ...workspace, note: e.target.value }; setWorkspace(next); setDirty(JSON.stringify(next) !== JSON.stringify(lastSaved.current)); } }} /></label>
         <div className={styles.noteFooter}><span>{(workspace?.note.length || 0).toLocaleString()} / 20,000</span><button className={styles.primary} disabled={disabled || !dirty} onClick={() => workspace && void save(workspace)}>{saving ? "Saving…" : "Save notepad"}</button></div>
       </section>
+      {!props.workspaceOnly && <>
       <section className={styles.card} aria-labelledby="crm-follow-ups" id="crm-follow-ups-panel">
         <div className={styles.cardHeading}><div><div className={styles.eyebrow}>{props.scopeLabel.toUpperCase()}</div><h2 id="crm-follow-ups">Conversation starters</h2></div><button onClick={props.onQuotes}>All quotes →</button></div>
         <p className={styles.help}>Unconverted quotes nearing their expiration date or untouched for at least a week. Review before reaching out.</p>
@@ -203,6 +205,7 @@ export default function SalesDashboard(props: Props) {
           <div className={styles.avatar} aria-hidden="true">{client.name.slice(0, 1).toUpperCase()}</div><div className={styles.clientCopy}><button className={styles.contactName} onClick={() => props.onClient(client.id)}>{client.name}</button><span>{client.location || "Open client details"}</span><div className={styles.contactActions}>{client.email && <a href={`mailto:${client.email}`}>Email</a>}{client.phone && <a href={`tel:${client.phone.replace(/[^\d+]/g, "")}`}>Call</a>}</div></div><button aria-label={`${pinned.includes(client.id) ? "Unpin" : "Pin"} ${client.name}`} disabled={disabled || (!pinned.includes(client.id) && pinned.length >= 24)} onClick={() => togglePin(client.id)}>{pinned.includes(client.id) ? "Unpin" : "Pin"}</button>
         </div>)}
       </section>
+      </>}
     </div>
   </div>;
 }
