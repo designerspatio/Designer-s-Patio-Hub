@@ -7963,9 +7963,7 @@ export default function Home() {
     cursorTop += 22;
 
     saleItems.forEach((item, index) => {
-      const manufacturer = manufacturers.find(
-        (entry) => entry.id === item.manufacturer_id
-      );
+      const manufacturer = manufacturers.find(entry => entry.id === item.manufacturer_id);
       const qty = Math.max(1, numberOrZero(item.quantity));
       const extended = qty * numberOrZero(item.unit_price);
       const details = [
@@ -7974,63 +7972,102 @@ export default function Home() {
         item.finish ? `Finish: ${item.finish}` : "",
         item.fabric_name ? `Fabric: ${item.fabric_name}` : "",
         item.grade ? `Grade: ${item.grade}` : "",
-        item.additional_details ? item.additional_details : "",
+        item.additional_details || "",
       ].filter(Boolean);
-
-      const descLines = details.flatMap((entry) =>
-        wrapPdfWidth(entry, col.description - 12, 7.1)
+      const descLines = details.flatMap((entry, detailIndex) =>
+        wrapPdfWidth(entry, col.description - 12, 7.1, detailIndex === 0)
       );
-      const shownDescLines = descLines.slice(0, 9);
-      const rowHeight = Math.max(55, 14 + shownDescLines.length * 9);
+      const skuLines = wrapPdfWidth(
+        isManufacturerCharge(item) ? "Charge" : item.sku || "-",
+        col.sku - 10,
+        7.2
+      );
+      const totalLines = Math.max(descLines.length, skuLines.length, 1);
+      let lineOffset = 0;
 
-      if (cursorTop + rowHeight > 716) {
+      const continueOnNewPage = () => {
         newPage(true);
         cursorTop = 58;
         drawTableHeader(cursorTop);
         cursorTop += 22;
+      };
+
+      while (lineOffset < totalLines) {
+        if (cursorTop + 55 > 716) continueOnNewPage();
+        const remainingLines = totalLines - lineOffset;
+        const idealHeight = Math.max(55, 14 + remainingLines * 9);
+        if (idealHeight > 716 - cursorTop && idealHeight <= 716 - 80) {
+          continueOnNewPage();
+        }
+        const maxLinesHere = Math.max(1, Math.floor((716 - cursorTop - 14) / 9));
+        const linesHere = Math.min(remainingLines, maxLinesHere);
+        const rowHeight = Math.max(55, 14 + linesHere * 9);
+        if (cursorTop + rowHeight > 716) {
+          continueOnNewPage();
+          continue;
+        }
+
+        strokeRect(col.x, cursorTop, tableWidth, rowHeight, [0.82, 0.85, 0.87], 0.45);
+        let x = col.x;
+        const widths = [
+          col.image, col.item, col.sku, col.description, col.qty, col.unit,
+        ];
+        widths.forEach(width => {
+          x += width;
+          lineAt(x, cursorTop, x, cursorTop + rowHeight, 0.35, [0.84, 0.87, 0.89]);
+        });
+
+        const imageName = itemImageNames[item.id];
+        if (lineOffset === 0) {
+          if (imageName) {
+            drawImage(imageName, col.x + 5, cursorTop + 5, col.image - 10, rowHeight - 10);
+          } else {
+            fillRect(col.x + 6, cursorTop + 7, col.image - 12, rowHeight - 14, [0.96, 0.97, 0.98]);
+            textAt(col.x + 13, cursorTop + rowHeight / 2 - 3, "IMAGE", 5.8, true, MID);
+          }
+        }
+
+        let cx = col.x + col.image;
+        if (lineOffset === 0) {
+          const itemNumber = String(index + 1);
+          const size = fitPdfSize(itemNumber, col.item - 8, 8, true);
+          textAt(cx + (col.item - pdfTextWidth(itemNumber, size, true)) / 2, cursorTop + 20, itemNumber, size, true, DARK);
+        } else {
+          textAt(cx + 3, cursorTop + 10, "CONT.", 5.5, false, MID);
+        }
+        cx += col.item;
+
+        skuLines.slice(lineOffset, lineOffset + linesHere).forEach((entry, i) => {
+          textAt(cx + 5, cursorTop + 8 + i * 9, entry, 7.2, false, DARK);
+        });
+        cx += col.sku;
+
+        descLines.slice(lineOffset, lineOffset + linesHere).forEach((entry, i) => {
+          textAt(cx + 6, cursorTop + 8 + i * 9, entry, 7.1, lineOffset + i === 0, DARK);
+        });
+        cx += col.description;
+
+        if (lineOffset === 0) {
+          const qtyLabel = String(qty);
+          const qtySize = fitPdfSize(qtyLabel, col.qty - 8, 7.5, true);
+          textAt(cx + (col.qty - pdfTextWidth(qtyLabel, qtySize, true)) / 2, cursorTop + 20, qtyLabel, qtySize, true, DARK);
+        }
+        cx += col.qty;
+        if (lineOffset === 0) {
+          const unitLabel = money(numberOrZero(item.unit_price));
+          textAt(cx + col.unit - 7, cursorTop + 20, unitLabel,
+            fitPdfSize(unitLabel, col.unit - 12, 7.2, true), true, DARK, "right");
+        }
+        cx += col.unit;
+        if (lineOffset === 0) {
+          const totalLabel = money(extended);
+          textAt(cx + col.total - 7, cursorTop + 20, totalLabel,
+            fitPdfSize(totalLabel, col.total - 12, 7.2, true), true, DARK, "right");
+        }
+
+        cursorTop += rowHeight;
+        lineOffset += linesHere;
       }
-
-      strokeRect(col.x, cursorTop, tableWidth, rowHeight, [0.82, 0.85, 0.87], 0.45);
-
-      let x = col.x;
-      const widths = [col.image, col.item, col.sku, col.description, col.qty, col.unit];
-      widths.forEach((width) => {
-        x += width;
-        lineAt(x, cursorTop, x, cursorTop + rowHeight, 0.35, [0.84, 0.87, 0.89]);
-      });
-
-      const imageName = itemImageNames[item.id];
-      if (imageName) {
-        drawImage(imageName, col.x + 5, cursorTop + 5, col.image - 10, rowHeight - 10);
-      } else {
-        fillRect(col.x + 6, cursorTop + 7, col.image - 12, rowHeight - 14, [0.96, 0.97, 0.98]);
-        textAt(col.x + 13, cursorTop + rowHeight / 2 - 3, "IMAGE", 5.8, true, MID);
-      }
-
-      let cx = col.x + col.image;
-      textAt(cx + col.item / 2 - 2, cursorTop + 20, String(index + 1), 8, true, DARK);
-      cx += col.item;
-      textAt(cx + 5, cursorTop + 18, isManufacturerCharge(item) ? "Charge" : item.sku || "-", 7.2, false, DARK);
-      cx += col.sku;
-
-      shownDescLines.forEach((entry, lineIndex) => {
-        textAt(
-          cx + 6,
-          cursorTop + 8 + lineIndex * 9,
-          entry,
-          7.1,
-          lineIndex === 0,
-          DARK
-        );
-      });
-      cx += col.description;
-      textAt(cx + col.qty / 2 - 2, cursorTop + 20, String(qty), 7.5, true, DARK);
-      cx += col.qty;
-      textAt(cx + col.unit - 7, cursorTop + 20, money(numberOrZero(item.unit_price)), 7.2, true, DARK, "right");
-      cx += col.unit;
-      textAt(cx + col.total - 7, cursorTop + 20, money(extended), 7.2, true, DARK, "right");
-
-      cursorTop += rowHeight;
     });
 
     // FINAL SUMMARY PAGE / AREA
