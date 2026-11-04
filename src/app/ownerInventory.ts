@@ -1,3 +1,5 @@
+import { type StockOrder, type StockOrderReceived, stockOrderTotals, stockRef, effectiveStockStatus } from "./stockOrders";
+
 // Owner dashboard inventory valuation. Stock POs must be genuinely detached from a
 // client sale; sales-linked POs are never classified as incoming showroom inventory.
 export type OwnerStockItem = {
@@ -39,6 +41,8 @@ export type OwnerIncomingPO = {
   incomingCost: number;
   pendingUnits: number;
   uncodedLines: number;
+  displayNumber: string;
+  stockOrderId: string | null;
 };
 export type OwnerInventorySummary = {
   onHandCost: number;
@@ -72,7 +76,9 @@ export function summarizeOwnerInventory(
   purchaseOrders: OwnerStockPO[],
   purchaseOrderItems: Record<string, OwnerStockLine[]>,
   manufacturerNames: Record<string, string>,
-  receipts: OwnerStockReceipt[] = []
+  receipts: OwnerStockReceipt[] = [],
+  stockOrders: StockOrder[] = [],
+  stockReceived: StockOrderReceived = {}
 ): OwnerInventorySummary {
   let onHandCost = 0;
   let unitsOnHand = 0;
@@ -131,7 +137,28 @@ export function summarizeOwnerInventory(
       orderedCost: cents(orderedCost),
       incomingCost: cents(incomingCost),
       pendingUnits,
-      uncodedLines
+      uncodedLines,
+      displayNumber: "PO #" + String(po.po_number),
+      stockOrderId: null
+    });
+  }
+  for (const order of stockOrders) {
+    if (order.status === "Draft" || order.status === "Cancelled" || effectiveStockStatus(order,stockReceived) === "Received") continue;
+    const totals=stockOrderTotals(order,stockReceived);
+    if (totals.remainingUnits <= 0) continue;
+    incomingOrders.push({
+      id:"stock:"+order.id,
+      number:order.sequence,
+      manufacturerId:order.manufacturer_id,
+      vendor:manufacturerNames[order.manufacturer_id] || "Unknown vendor",
+      status:effectiveStockStatus(order,stockReceived),
+      estimatedShipDate:order.estimated_ship_date,
+      orderedCost:totals.ordered,
+      incomingCost:totals.pending,
+      pendingUnits:totals.remainingUnits,
+      uncodedLines:order.lines.filter(line=>line.unit_cost<=0).length,
+      displayNumber:stockRef(order.sequence),
+      stockOrderId:order.id
     });
   }
   incomingOrders.sort((a,b)=>b.incomingCost-a.incomingCost || b.number-a.number);

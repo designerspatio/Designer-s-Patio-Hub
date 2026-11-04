@@ -11,6 +11,8 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
+import StockPurchaseOrders from "./StockPurchaseOrders";
+import { type StockOrder, type StockOrderReceived } from "./stockOrders";
 import type { OwnerStockReceipt } from "./ownerInventory";
 import { type ExpenseAccount, type ExpenseAccountDraft, expenseKey } from "./financeAccounts";
 import { dashboardModeForProfile } from "./dashboardMode";
@@ -27,7 +29,7 @@ import {
   type ReactNode,
 } from "react";
 
-type View = "dashboard" | "clients" | "scan" | "manufacturers" | "quotes" | "sales" | "purchase_orders" | "inventory" | "daily_cash" | "accounting" | "catalogs" | "price_lists" | "ai_finder" | "acknowledgements" | "reports" | "team" | "settings";
+type View = "dashboard" | "stock_orders" | "clients" | "scan" | "manufacturers" | "quotes" | "sales" | "purchase_orders" | "inventory" | "daily_cash" | "accounting" | "catalogs" | "price_lists" | "ai_finder" | "acknowledgements" | "reports" | "team" | "settings";
 type ClientMode = "view" | "edit" | "new";
 type ManufacturerMode = "view" | "edit" | "new";
 
@@ -2458,6 +2460,12 @@ export default function Home() {
   const [ownerStockReceipts, setOwnerStockReceipts] = useState<OwnerStockReceipt[]>([]);
   const [ownerStockReceiptsLoading, setOwnerStockReceiptsLoading] = useState(false);
   const [ownerStockReceiptsError, setOwnerStockReceiptsError] = useState("");
+  const [stockOrders, setStockOrders] = useState<StockOrder[]>([]);
+  const [stockReceived, setStockReceived] = useState<StockOrderReceived>({});
+  const [stockOrdersVersion, setStockOrdersVersion] = useState(0);
+  const [stockOrdersLoading, setStockOrdersLoading] = useState(false);
+  const [stockOrdersError, setStockOrdersError] = useState("");
+  const [openingStockOrderId, setOpeningStockOrderId] = useState<string|null>(null);
   const [inventoryTags, setInventoryTags] =
     useState<InventoryTag[]>([]);
   const [selectedInventoryItem, setSelectedInventoryItem] =
@@ -3323,6 +3331,28 @@ export default function Home() {
     }
   }, [supabase, session?.user?.id]);
 
+  const loadStockOrders = useCallback(async () => {
+    if (!supabase || !session?.user?.id) {
+      setStockOrders([]);setStockReceived({});setStockOrdersVersion(0);
+      setStockOrdersError("");setStockOrdersLoading(false);
+      return;
+    }
+    setStockOrdersLoading(true);setStockOrdersError("");
+    try {
+      const auth=await supabase.auth.getSession();
+      const token=auth.data.session?.access_token;
+      if(!token)throw new Error("Sign in again to view stock purchase orders.");
+      const resp=await fetch("/api/stock-orders",{cache:"no-store",headers:{Authorization:`Bearer ${token}`}});
+      const data=await resp.json().catch(()=>({error:"Could not read stock purchase order data."}));
+      if(!resp.ok)throw new Error(data.error||"Stock purchase orders are unavailable.");
+      setStockOrders(Array.isArray(data.orders)?data.orders:[]);
+      setStockReceived(data.received&&typeof data.received==="object"?data.received:{});
+      setStockOrdersVersion(Number(data.version)||0);
+    }catch(error){
+      setStockOrdersError(error instanceof Error?error.message:"Could not load stock orders.");
+    }finally{setStockOrdersLoading(false);}
+  },[supabase,session?.user?.id]);
+
   const loadInventoryItems = useCallback(async () => {
     if (!supabase || !session?.user?.id) {
       setInventoryItems([]);
@@ -4083,17 +4113,23 @@ export default function Home() {
   useEffect(() => {
     if (!session?.user?.id || profile?.role !== "Owner" || view !== "dashboard") return;
     const refreshBusiness = () => {
-      void Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadInventoryItems(), loadOwnerStockReceipts(), loadAccounting()]);
+      void Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadStockOrders(), loadInventoryItems(), loadOwnerStockReceipts(), loadAccounting()]);
     };
     const timer = window.setInterval(refreshBusiness, 300000);
     window.addEventListener("focus", refreshBusiness);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshBusiness); };
-  }, [session?.user?.id, profile?.role, view, loadSalesOrders, loadQuotes, loadPurchaseOrders, loadInventoryItems, loadOwnerStockReceipts, loadAccounting]);
+  }, [session?.user?.id, profile?.role, view, loadSalesOrders, loadQuotes, loadPurchaseOrders, loadStockOrders, loadInventoryItems, loadOwnerStockReceipts, loadAccounting]);
 
   useEffect(() => {
     if (!session?.user?.id || profile?.role !== "Owner") return;
     void loadOwnerStockReceipts();
   }, [session?.user?.id, profile?.role, loadOwnerStockReceipts]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const permitted = ["Owner","Manager","Assistant Manager","Shipping / Accounting"].includes(profile?.role||"");
+    if (permitted && (profile?.role === "Owner" || view === "stock_orders")) void loadStockOrders();
+  },[session?.user?.id,profile?.role,view,loadStockOrders]);
 
   useEffect(() => {
     if (!profile?.id || !session?.user?.id) return;
@@ -5166,6 +5202,7 @@ export default function Home() {
     setInventoryItems([]);
     setOwnerStockReceipts([]);
     setOwnerStockReceiptsError("");
+    setStockOrders([]);setStockReceived({});setStockOrdersVersion(0);setStockOrdersError("");setOpeningStockOrderId(null);
     setInventoryTags([]);
     setSelectedInventoryItem(null);
     setInventoryScanCodes([]);
@@ -18483,6 +18520,7 @@ export default function Home() {
     "there";
 
   const dashboardMode = dashboardModeForProfile(profile);
+  const canManageStockOrders = ["Owner","Manager","Assistant Manager","Shipping / Accounting"].includes(profile?.role||"");
 
   return (
     <>
@@ -18678,6 +18716,14 @@ export default function Home() {
                 Purchase Orders
               </button>
 
+              {canManageStockOrders && <button
+                className={`nav-button ${view === "stock_orders" ? "active" : ""}`}
+                onClick={() => {setView("stock_orders");setOpeningStockOrderId(null);setMessage("");}}
+              >
+                <span>▣</span>
+                Stock Purchase Orders
+              </button>}
+
               <button
                 className={`nav-button ${
                   view === "acknowledgements" ? "active" : ""
@@ -18769,6 +18815,8 @@ export default function Home() {
                   ? "Sales Orders"
                   : view === "purchase_orders"
                   ? "Purchase Orders"
+                  : view === "stock_orders"
+                  ? "Stock Purchase Orders"
                   : view === "inventory"
                   ? "Inventory"
                   : view === "daily_cash"
@@ -18851,6 +18899,7 @@ export default function Home() {
                 </div>
 
                 <div className="inventory-page-actions">
+                  {canManageStockOrders && <button className="inventory-export-button" onClick={()=>setView("stock_orders")}>Stock Purchase Orders →</button>}
                   <label
                     className={`inventory-import-button ${
                       importingInventory ? "disabled" : ""
@@ -21308,6 +21357,10 @@ export default function Home() {
                 quotes={quotes}
                 quoteItems={quoteItemsSummary}
                 purchaseOrders={purchaseOrders}
+                stockOrders={stockOrders}
+                stockReceived={stockReceived}
+                loadingStockOrders={stockOrdersLoading}
+                stockOrdersError={stockOrdersError}
                 inventory={inventoryItems}
                 purchaseOrderItems={purchaseOrderItemsSummary}
                 stockReceipts={ownerStockReceipts}
@@ -21322,11 +21375,13 @@ export default function Home() {
                 loadingQuotes={quotesLoading}
                 loadingPurchases={purchaseOrdersLoading}
                 loadingAccounting={accountingLoading}
-                onRefresh={async () => { await Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadInventoryItems(), loadOwnerStockReceipts(), loadAccounting()]); }}
+                onRefresh={async () => { await Promise.all([loadSalesOrders(), loadQuotes(), loadPurchaseOrders(), loadStockOrders(), loadInventoryItems(), loadOwnerStockReceipts(), loadAccounting()]); }}
                 onSales={() => { setView("sales"); setRecordScope("all"); setScopeSalespersonId(""); }}
                 onQuotes={() => { setView("quotes"); setRecordScope("all"); setScopeSalespersonId(""); }}
                 onPurchases={() => { setView("purchase_orders"); setRecordScope("all"); setScopeSalespersonId(""); }}
                 onInventory={() => setView("inventory")}
+                onStockOrders={() => {setOpeningStockOrderId(null);setView("stock_orders");}}
+                onStockOrder={id => {setOpeningStockOrderId(id);setView("stock_orders");}}
                 onPurchaseOrder={id => { const order = purchaseOrders.find(po => po.id === id); if (order) { setView("purchase_orders"); void openPurchaseOrder(order); } }}
                 onAccounting={() => { setView("accounting"); setAccountingSection("invoices"); }}
                 onReports={() => setView("reports")}
@@ -22627,6 +22682,23 @@ export default function Home() {
             </section>
           )}
 
+          {view === "stock_orders" && canManageStockOrders && (
+            <StockPurchaseOrders
+              supabase={supabase}
+              orders={stockOrders}
+              received={stockReceived}
+              version={stockOrdersVersion}
+              loading={stockOrdersLoading}
+              error={stockOrdersError}
+              inventory={inventoryItems}
+              manufacturers={manufacturers}
+              openOrderId={openingStockOrderId}
+              onOpenOrderHandled={()=>setOpeningStockOrderId(null)}
+              onRefresh={loadStockOrders}
+              onInventoryCreated={loadInventoryItems}
+            />
+          )}
+
           {view === "purchase_orders" && (
             <section>
               <div className="page-heading">
@@ -22635,6 +22707,7 @@ export default function Home() {
                     VENDOR ORDER MANAGEMENT
                   </div>
                   <h1>Purchase Orders</h1>
+                  {canManageStockOrders && <button className="page-primary" onClick={()=>setView("stock_orders")}>Stock Purchase Orders →</button>}
                   <p>
                     Special Order merchandise is split by manufacturer
                     and tracked from Draft through receipt.

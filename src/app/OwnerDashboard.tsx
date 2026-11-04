@@ -3,11 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildOwnerHighlights, type OwnerInput, type SalesRank } from "./ownerHighlights";
 import OwnerInventoryPanel from "./OwnerInventoryPanel";
+import { type StockOrder, type StockOrderReceived } from "./stockOrders";
 import { summarizeOwnerInventory, type OwnerStockPO, type OwnerStockItem, type OwnerStockLine, type OwnerStockReceipt } from "./ownerInventory";
 import styles from "./OwnerDashboard.module.css";
 
 type Props = Omit<OwnerInput,"today" | "purchaseOrders"> & {
   purchaseOrders: OwnerStockPO[];
+  stockOrders: StockOrder[];
+  stockReceived: StockOrderReceived;
+  loadingStockOrders: boolean;
+  stockOrdersError: string;
+  onStockOrders:()=>void;
+  onStockOrder:(id:string)=>void;
   inventory: OwnerStockItem[];
   purchaseOrderItems: Record<string,OwnerStockLine[]>;
   stockReceipts: OwnerStockReceipt[];
@@ -53,8 +60,8 @@ export default function OwnerDashboard(props:Props) {
     return ()=>{window.clearInterval(timer);window.removeEventListener("focus",onFocus);};
   },[]);
   const data=useMemo(()=>buildOwnerHighlights({...props,today}),[props.sales,props.saleItems,props.quotes,props.quoteItems,props.purchaseOrders,props.invoices,props.vendorPayments,props.team,props.manufacturers,today]);
-  const loading=props.loadingSales||props.loadingQuotes||props.loadingPurchases||props.loadingAccounting||props.loadingInventory||props.loadingStockReceipts;
-  const inventorySummary=useMemo(()=>summarizeOwnerInventory(props.inventory,props.purchaseOrders,props.purchaseOrderItems,Object.fromEntries(props.manufacturers.map(m=>[m.id,m.name])),props.stockReceipts),[props.inventory,props.purchaseOrders,props.purchaseOrderItems,props.manufacturers,props.stockReceipts]);
+  const loading=props.loadingSales||props.loadingQuotes||props.loadingPurchases||props.loadingAccounting||props.loadingInventory||props.loadingStockReceipts||props.loadingStockOrders;
+  const inventorySummary=useMemo(()=>summarizeOwnerInventory(props.inventory,props.purchaseOrders,props.purchaseOrderItems,Object.fromEntries(props.manufacturers.map(m=>[m.id,m.name])),props.stockReceipts,props.stockOrders,props.stockReceived),[props.inventory,props.purchaseOrders,props.purchaseOrderItems,props.manufacturers,props.stockReceipts,props.stockOrders,props.stockReceived]);
   const maxMonth=data.months.reduce((max,month)=>Math.max(max,month.amount),0);
   const monthName=new Date(today+"T12:00:00").toLocaleDateString("en-US",{month:"long"});
   const bestMaker=data.topManufacturers[0],bestRep=data.salespeople[0];
@@ -116,11 +123,14 @@ export default function OwnerDashboard(props:Props) {
     </div>
     <OwnerInventoryPanel
       summary={inventorySummary}
-      loading={props.loadingInventory || props.loadingPurchases || props.loadingStockReceipts}
+      loading={props.loadingInventory || props.loadingPurchases || props.loadingStockReceipts || props.loadingStockOrders}
       receiptsError={props.stockReceiptsError}
+      stockOrdersError={props.stockOrdersError}
       onInventory={props.onInventory}
       onPurchaseOrders={props.onPurchases}
       onPurchaseOrder={props.onPurchaseOrder}
+      onStockOrders={props.onStockOrders}
+      onStockOrder={props.onStockOrder}
     />
     <section className={`${styles.panel} ${styles.vendorCommitmentStrip}`}>
       <div><div className={styles.eyebrow}>PURCHASING SNAPSHOT</div><h2>Vendor commitments</h2></div>

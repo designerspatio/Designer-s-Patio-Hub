@@ -3,9 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const { stripTypeScriptTypes } = require("node:module");
-const source=stripTypeScriptTypes(fs.readFileSync("src/app/ownerInventory.ts","utf8"),{mode:"transform"}).replace(/export /g,"");
+const source=stripTypeScriptTypes(fs.readFileSync("src/app/ownerInventory.ts","utf8"),{mode:"transform"}).replace(/^import .*?;\n/gm,"").replace(/export /g,"");
+const stockSource=stripTypeScriptTypes(fs.readFileSync("src/app/stockOrders.ts","utf8"),{mode:"transform"}).replace(/export /g,"");
 const context={module:{exports:{}}};
-vm.runInNewContext(source+"\nmodule.exports={summarizeOwnerInventory,isIncomingStockPO};",context);
+vm.runInNewContext(stockSource+"\n"+source+"\nmodule.exports={summarizeOwnerInventory,isIncomingStockPO};",context);
 const {summarizeOwnerInventory,isIncomingStockPO}=context.module.exports;
 const inventory=[
   {id:"a",quantity_on_hand:4,unit_cost:125,active:true},
@@ -55,4 +56,21 @@ test("a sale-linked PO or line never qualifies as stock",()=>{
  assert.equal(isIncomingStockPO(purchaseOrders[5],lines.po6),false);
  assert.equal(isIncomingStockPO(purchaseOrders[0],lines.po1),true);
  assert.equal(isIncomingStockPO(purchaseOrders[4],lines.po5),false);
+});
+
+
+test("standalone stock purchase orders feed owner incoming valuation without counting received units twice",()=>{
+ const standalone={id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",sequence:25,manufacturer_id:"ebel",
+  status:"Shipped",order_date:"2026-11-01",estimated_ship_date:"2026-11-08",notes:null,
+  created_by:"owner",created_at:"2026-11-01",updated_at:"2026-11-01",
+  lines:[{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",inventory_item_id:"a",name:"Ebel chair",sku:"CHAIR",quantity:5,unit_cost:125}]};
+ const result=summarizeOwnerInventory(inventory,[],{}, {ebel:"Ebel"},[],[standalone],{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb":2});
+ assert.equal(result.incomingPOCount,1);
+ assert.equal(result.incomingCost,375);
+ assert.equal(result.incomingOrders[0].displayNumber,"STK-0025");
+ assert.equal(result.incomingOrders[0].stockOrderId,standalone.id);
+ assert.equal(result.projectedCost,1085);
+ const fullyReceived=summarizeOwnerInventory(inventory,[],{}, {ebel:"Ebel"},[],[standalone],{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb":5});
+ assert.equal(fullyReceived.incomingCost,0);
+ assert.equal(fullyReceived.incomingPOCount,0);
 });
