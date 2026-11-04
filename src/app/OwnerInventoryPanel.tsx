@@ -11,12 +11,14 @@ type Props = {
   onInventory: () => void;
   onPurchaseOrders: () => void;
   onPurchaseOrder: (id: string) => void;
+  onStockOrders: () => void;
+  onStockOrder: (id: string) => void;
 };
 
 const money=(amount:number)=>amount.toLocaleString("en-US",{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2});
 const date=(value:string|null)=> value ? new Date(value.slice(0,10)+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "Not set";
 
-export default function OwnerInventoryPanel({summary,loading,receiptsError,onInventory,onPurchaseOrders,onPurchaseOrder}:Props) {
+export default function OwnerInventoryPanel({summary,loading,receiptsError,onInventory,onPurchaseOrders,onPurchaseOrder,onStockOrders,onStockOrder}:Props) {
   const vendorTotals=useMemo(()=>{
     const grouped=new Map<string,{id:string;name:string;amount:number;orders:number}>();
     summary.incomingOrders.forEach(po=>{
@@ -35,7 +37,8 @@ export default function OwnerInventoryPanel({summary,loading,receiptsError,onInv
       </div>
       <div className={styles.inventoryActions}>
         <button type="button" onClick={onInventory}>Inventory records →</button>
-        <button type="button" onClick={onPurchaseOrders}>Purchase orders →</button>
+        <button type="button" onClick={onStockOrders}>Stock purchase orders →</button>
+        <button type="button" onClick={onPurchaseOrders}>Client purchase orders →</button>
       </div>
     </div>
     <div className={styles.inventoryMetrics}>
@@ -61,19 +64,19 @@ export default function OwnerInventoryPanel({summary,loading,receiptsError,onInv
     {receiptsError && <p role="alert" className={styles.stockNotice}>PO receipt history could not be read. Incoming values may include partially received stock: {receiptsError}</p>}
     <div className={styles.stockHeading}>
       <div><h3>Stock purchase orders on the way</h3>
-        <p>Purchase orders not linked to a client sale, excluding draft, received and closed orders. Values use acknowledged cost when available.</p>
+        <p>Standalone stock POs and any existing unlinked POs, excluding drafts and fully received orders. Values are remaining merchandise costs.</p>
       </div>
     </div>
     {loading ? <p className={styles.empty}>Loading stock purchase orders…</p> :
       summary.incomingOrders.length===0 ? <div className={styles.emptyStock}>
         <strong>No incoming stock purchase orders identified.</strong>
-        <p>Client-specific purchase orders are excluded. The Hub currently creates POs from sales orders, so separately recorded stock orders are needed for incoming stock values to appear here.</p>
+        <p>Client-specific purchase orders are excluded. Create a standalone stock purchase order to track stock that is being purchased for the showroom or warehouse.</p>
       </div> :
       <div className={styles.stockTableWrap}>
         <table className={styles.stockTable}>
           <thead><tr><th scope="col">STOCK PO</th><th scope="col">MANUFACTURER</th><th scope="col">STATUS</th><th scope="col">EST. SHIP</th><th scope="col">UNITS ON ORDER</th><th scope="col">INCOMING COST</th></tr></thead>
           <tbody>{summary.incomingOrders.map(order=><tr key={order.id}>
-            <td><button type="button" onClick={()=>onPurchaseOrder(order.id)} className={styles.stockPoLink}>PO #{order.number} <span>↗</span></button></td>
+            <td><button type="button" onClick={()=>order.stockOrderId?onStockOrder(order.stockOrderId):onPurchaseOrder(order.id)} className={styles.stockPoLink}>{order.displayNumber} <span>↗</span></button></td>
             <td className={styles.stockVendor}>{order.vendor}</td>
             <td>{order.status}</td><td>{date(order.estimatedShipDate)}</td>
             <td className={styles.numeric}>{order.pendingUnits.toLocaleString()}</td>
@@ -88,6 +91,6 @@ export default function OwnerInventoryPanel({summary,loading,receiptsError,onInv
         <span>{row.name} <small>· {row.orders} {row.orders===1?"PO":"POs"}</small></span><strong>{money(row.amount)}</strong>
       </div>)}</div>
     </div>}
-    <p className={styles.inventoryFootnote}>On-hand cost = active items’ quantity on hand × unit cost. Incoming stock uses unreceived quantities on standalone stock POs, excluding customer-linked orders. Linked receipt movements are deducted when recorded; unmatched manual receipts may not reduce an open PO’s balance. Freight and tax are not included.</p>
+    <p className={styles.inventoryFootnote}>On-hand cost = active items’ quantity on hand × unit cost. Incoming stock includes unreceived quantities from stock POs and excludes customer-linked orders. Received stock moves from incoming value to on-hand inventory at the recorded cost. Freight and tax are excluded.</p>
   </section>;
 }
