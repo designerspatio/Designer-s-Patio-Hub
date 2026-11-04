@@ -18477,7 +18477,7 @@ export default function Home() {
                 }}
               >
                 <span>⌂</span>
-                Dashboard
+                 {dashboardMode === "owner" ? "Owner Dashboard" : "Dashboard"}
               </button>
             </div>
 
@@ -18711,7 +18711,7 @@ export default function Home() {
             <div>
               <div className="topbar-title">
                 {view === "dashboard"
-                  ? "Dashboard"
+                  ? dashboardMode === "owner" ? "Owner Dashboard" : "Dashboard"
                   : view === "clients"
                   ? "Clients"
                   : view === "scan"
