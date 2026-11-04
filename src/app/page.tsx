@@ -21372,9 +21372,9 @@ export default function Home() {
                         </div>
 
                         <div className="client-row-sales">
-                          <span>Salesperson</span>
+                          <span>Salespeople</span>
                           <strong>
-                            {salespersonName(client.assigned_user_id)}
+                            {clientSalespeopleNames(client)}
                           </strong>
                         </div>
 
@@ -22872,11 +22872,16 @@ export default function Home() {
 
                 <div className="detail-grid">
                   <DetailField
-                    label="Salesperson"
-                    value={salespersonName(
-                      selectedClient.assigned_user_id
-                    )}
+                    label="Primary salesperson"
+                    value={salespersonName(selectedClient.assigned_user_id)}
                   />
+                  {(clientAdditionalSalespeople[selectedClient.id] || []).length > 0 && (
+                    <DetailField
+                      label="Additional salespeople"
+                      value={(clientAdditionalSalespeople[selectedClient.id] || [])
+                        .map(id => salespersonName(id)).join(", ")}
+                    />
+                  )}
 
                   <DetailField
                     label="Phone"
@@ -23479,7 +23484,7 @@ export default function Home() {
                     />
                   </FormField>
 
-                  <FormField label="Salesperson" wide>
+                  <FormField label="Primary salesperson" wide>
                     <select
                       value={clientForm.assigned_user_id}
                       onChange={(e) =>
@@ -23497,6 +23502,22 @@ export default function Home() {
                       ))}
                     </select>
                   </FormField>
+
+                  <FormField label="Additional salespeople" wide>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", padding: "8px 0" }}>
+                      {team.filter(person => person.id !== clientForm.assigned_user_id).map(person => (
+                        <label key={person.id} style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                          <input type="checkbox"
+                            checked={clientAdditionalSelection.includes(person.id)}
+                            onChange={e => setClientAdditionalSelection(current =>
+                              e.target.checked ? [...new Set([...current, person.id])] : current.filter(id => id !== person.id))} />
+                          {person.display_name}
+                        </label>
+                      ))}
+                    </div>
+                    <small>Shared clients appear under multiple salespeople. Primary salesperson remains the default for quotes and sales.</small>
+                  </FormField>
+
 
                   <FormField label="Phone">
                     <input
@@ -23610,6 +23631,7 @@ export default function Home() {
                       if (clientMode === "edit" && selectedClient) {
                         setClientMode("view");
                         setClientForm(clientToForm(selectedClient));
+                        setClientAdditionalSelection(clientAdditionalSalespeople[selectedClient.id] || []);
                       } else {
                         closeClientModal();
                       }
