@@ -1,5 +1,7 @@
 "use client";
 
+import {availableToSell,validateInventoryCounts,validateQuoteInventory,validateSalesOrderInventory} from "./inventoryAvailability";
+
 import ChangePassword from "./ChangePassword";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
@@ -93,6 +95,9 @@ type InventoryItem = {
   description: string | null;
   location: string | null;
   quantity_on_hand: number;
+  quantity_damaged: number;
+  quantity_nailed_down: number;
+  quantity_reserved?: number;
   unit_cost: number;
   msrp: number;
   active: boolean;
@@ -107,6 +112,8 @@ type InventoryItemForm = {
   description: string;
   location: string;
   quantity_on_hand: string;
+  quantity_damaged: string;
+  quantity_nailed_down: string;
   unit_cost: string;
   msrp: string;
   active: boolean;
@@ -153,7 +160,7 @@ type InventoryAdjustmentForm = {
 };
 
 const inventoryItemColumns =
-  "id,sku,name,manufacturer_id,description,location,quantity_on_hand,unit_cost,msrp,active,created_at,updated_at";
+  "id,sku,name,manufacturer_id,description,location,quantity_on_hand,quantity_damaged,quantity_nailed_down,unit_cost,msrp,active,created_at,updated_at";
 
 const inventoryScanCodeColumns =
   "id,inventory_item_id,scan_code,code_type,created_at";
@@ -171,6 +178,8 @@ const blankInventoryItemForm: InventoryItemForm = {
   description: "",
   location: "",
   quantity_on_hand: "0",
+  quantity_damaged: "0",
+  quantity_nailed_down: "0",
   unit_cost: "0",
   msrp: "0",
   active: true,
@@ -241,6 +250,7 @@ type QuoteItem = {
   id?: string;
   local_id: string;
   quote_id?: string;
+  inventory_item_id: string | null;
   manufacturer_id: string;
   sort_order: number;
   quantity: string;
@@ -285,7 +295,7 @@ const quoteColumns =
   "id,quote_number,client_id,salesperson_user_id,status,approved,approved_at,converted_sales_order_id,quote_date,expiration_date,customer_po,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,notes,freight_amount,adjustment_amount,created_at,updated_at";
 
 const quoteItemColumns =
-  "id,quote_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,commissionable";
+  "id,quote_id,inventory_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,commissionable";
 
 type SalesOrder = {
   id: string;
@@ -2020,6 +2030,8 @@ function inventoryItemToForm(
     quantity_on_hand: String(
       numberOrZero(item.quantity_on_hand)
     ),
+    quantity_damaged: String(numberOrZero(item.quantity_damaged)),
+    quantity_nailed_down: String(numberOrZero(item.quantity_nailed_down)),
     unit_cost: String(numberOrZero(item.unit_cost)),
     msrp: String(numberOrZero(item.msrp)),
     active: item.active !== false,
@@ -2118,6 +2130,7 @@ function newLocalId() {
 function blankQuoteItem(sortOrder = 0): QuoteItem {
   return {
     local_id: newLocalId(),
+    inventory_item_id: null,
     manufacturer_id: "",
     sort_order: sortOrder,
     quantity: "1",
@@ -8464,6 +8477,11 @@ export default function Home() {
         : "Draft"
       : "Archived";
 
+    const quoteStockError = validateQuoteInventory(
+      quoteItems.filter((line) => !isManufacturerCharge(line) && line.inventory_item_id)
+        .map((line) => ({inventory_item_id:line.inventory_item_id!,quantity:numberOrZero(line.quantity)})),
+      new Map(inventoryItems.map((stock) => [stock.id,stock])));
+    if (quoteStockError) {setMessage(quoteStockError);return;}
     setSavingQuote(true);
     setMessage("");
 
@@ -8595,6 +8613,7 @@ export default function Home() {
       )
       .map((item, index) => ({
         quote_id: quoteId,
+        inventory_item_id: item.inventory_item_id || null,
         manufacturer_id: item.manufacturer_id || null,
         sort_order: index,
         quantity: Math.max(1, numberOrZero(item.quantity)),
@@ -9163,6 +9182,11 @@ export default function Home() {
     );
     if (!confirmed) return;
 
+    const conversionStockError = validateQuoteInventory(
+      quoteItems.filter((line) => !isManufacturerCharge(line) && line.inventory_item_id)
+        .map((line) => ({inventory_item_id:line.inventory_item_id!,quantity:numberOrZero(line.quantity)})),
+      new Map(inventoryItems.map((stock) => [stock.id,stock])));
+    if (conversionStockError) {setMessage(conversionStockError);return;}
     setConvertingQuote(true);
     setMessage("");
 
@@ -9257,8 +9281,8 @@ export default function Home() {
         expected_unit_cost: calculatedItem.expected_unit_cost,
         acknowledged_unit_cost: null,
         commissionable: calculatedItem.commissionable,
-        fulfillment_method: "Special Order",
-        inventory_item_id: null,
+        fulfillment_method: calculatedItem.inventory_item_id ? "Inventory" : "Special Order",
+        inventory_item_id: calculatedItem.inventory_item_id || null,
         updated_at: new Date().toISOString(),
       };
     });
@@ -9422,9 +9446,7 @@ export default function Home() {
       );
 
     return (
-      numberOrZero(
-        inventoryItem.quantity_on_hand
-      ) + alreadyAllocatedToThisSale
+      availableToSell(inventoryItem) + alreadyAllocatedToThisSale
     );
   }
 
@@ -9864,6 +9886,13 @@ export default function Home() {
       }
     }
 
+    const saleStockError = validateSalesOrderInventory(
+      inventoryLines.map((line) => ({inventory_item_id:line.inventory_item_id,quantity:numberOrZero(line.quantity)})),
+      new Map(inventoryItems.map((stock) => [stock.id,stock])),
+      new Map(saleItems.filter((line) => line.fulfillment_method === "Inventory" && line.inventory_item_id)
+        .map((line) => [line.inventory_item_id!, saleItems.filter((other) => other.fulfillment_method === "Inventory" &&
+          other.inventory_item_id === line.inventory_item_id).reduce((n,other) => n + numberOrZero(other.quantity),0)])));
+    if (saleStockError) {setMessage(saleStockError);return;}
     setSavingSale(true);
     setMessage("");
 
@@ -12054,6 +12083,15 @@ export default function Home() {
       return;
     }
 
+    const inventoryCountError = validateInventoryCounts({
+      id: selectedInventoryItem?.id || "new",
+      quantity_on_hand: inventoryMode === "new"
+        ? Number(inventoryForm.quantity_on_hand) : numberOrZero(selectedInventoryItem?.quantity_on_hand),
+      quantity_damaged: Number(inventoryForm.quantity_damaged),
+      quantity_nailed_down: Number(inventoryForm.quantity_nailed_down),
+      quantity_reserved: numberOrZero(selectedInventoryItem?.quantity_reserved)
+    });
+    if (inventoryCountError) {window.alert(inventoryCountError);return;}
     setSavingInventoryItem(true);
     setMessage("");
 
@@ -12065,6 +12103,8 @@ export default function Home() {
       description:
         inventoryForm.description.trim() || null,
       location: inventoryForm.location.trim() || null,
+      quantity_damaged: Math.trunc(numberOrZero(inventoryForm.quantity_damaged)),
+      quantity_nailed_down: Math.trunc(numberOrZero(inventoryForm.quantity_nailed_down)),
       unit_cost: numberOrZero(inventoryForm.unit_cost),
       msrp: numberOrZero(inventoryForm.msrp),
       active: inventoryForm.active,
@@ -24937,6 +24977,38 @@ export default function Home() {
                           </button>
                         </div>
 
+                        <div style={{padding:"8px 0 12px"}}>
+                          <label style={{display:"grid",gap:5}}>
+                            <strong>Pull From Inventory</strong>
+                            <select
+                              value={item.inventory_item_id || ""}
+                              onChange={(e) => {
+                                const chosen = inventoryItems.find((stock) => stock.id === e.target.value);
+                                setQuoteItems((current) => current.map((line) =>
+                                  line.local_id !== item.local_id ? line : !chosen
+                                    ? {...line, inventory_item_id:null}
+                                    : {...line, inventory_item_id:chosen.id,
+                                        manufacturer_id:chosen.manufacturer_id || "",
+                                        sku:chosen.sku || "", description:chosen.description || chosen.name,
+                                        msrp_at_grade:numberOrZero(chosen.msrp),
+                                        unit_price:numberOrZero(chosen.msrp),
+                                        discount_pct:0, expected_unit_cost:numberOrZero(chosen.unit_cost),
+                                        quantity:"1"}));
+                              }}
+                            >
+                              <option value="">Special order / not from inventory</option>
+                              {inventoryItems.filter((stock) => stock.id === item.inventory_item_id ||
+                                availableToSell(stock) > 0).map((stock) => (
+                                <option key={stock.id} value={stock.id}>
+                                  {stock.sku || stock.name} • {stock.name} • {availableToSell(stock)} available
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {item.inventory_item_id && (
+                            <small>Inventory is allocated and deducted from available stock when this quote becomes a sales order.</small>
+                          )}
+                        </div>
                         <div className="quote-line-grid">
                           <FormField
                             label="Manufacturer"
@@ -27736,6 +27808,27 @@ export default function Home() {
                     />
                   </FormField>
 
+                  <FormField label="Damaged Units">
+                    <input type="number" min={0} step={1}
+                      value={inventoryForm.quantity_damaged}
+                      onChange={(event) => updateInventoryForm("quantity_damaged", event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Nailed Down Units">
+                    <input type="number" min={0} step={1}
+                      value={inventoryForm.quantity_nailed_down}
+                      onChange={(event) => updateInventoryForm("quantity_nailed_down", event.target.value)}
+                    />
+                  </FormField>
+                  <div style={{padding:"10px 12px",fontSize:13}}>
+                    Available to sell: {selectedInventoryItem
+                      ? availableToSell({...selectedInventoryItem,
+                          quantity_damaged: numberOrZero(inventoryForm.quantity_damaged),
+                          quantity_nailed_down: numberOrZero(inventoryForm.quantity_nailed_down)})
+                      : Math.max(0, numberOrZero(inventoryForm.quantity_on_hand)
+                          - numberOrZero(inventoryForm.quantity_damaged)
+                          - numberOrZero(inventoryForm.quantity_nailed_down))}
+                  </div>
                   <FormField label="Status">
                     <select
                       value={
