@@ -3,7 +3,7 @@
  *
  * An inventory item is a SKU, not necessarily a unique physical piece. Track
  * damaged and nailed-down units separately so the remaining units can sell.
- * Reservations exist only for customer sales orders, not draft quotes.
+ * Production deducts on-hand units on sales-order allocation, not on quotes.
  *
  * IMPORTANT: Commit reservations and inventory movements atomically in the
  * database. These helpers are validation/calculation, not a substitute for
@@ -82,7 +82,8 @@ export function validateInventorySelection(
     const error = validateInventoryCounts(item);
     if (error) return error;
     const owned = existingOrderReservations.get(id) ?? 0;
-    if (!nonNegativeInt(owned) || owned > (item.quantity_reserved ?? 0))
+    // Existing allocations have already been deducted from on-hand stock.
+    if (!nonNegativeInt(owned))
       return "Existing order reservation is invalid.";
     const available = availableToSell(item) + owned;
     if (quantity > available)
