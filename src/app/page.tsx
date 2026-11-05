@@ -97,7 +97,7 @@ type InventoryItem = {
   quantity_on_hand: number;
   quantity_damaged: number;
   quantity_nailed_down: number;
-  quantity_reserved: number;
+  quantity_reserved?: number;
   unit_cost: number;
   msrp: number;
   active: boolean;
@@ -160,7 +160,7 @@ type InventoryAdjustmentForm = {
 };
 
 const inventoryItemColumns =
-  "id,sku,name,manufacturer_id,description,location,quantity_on_hand,quantity_damaged,quantity_nailed_down,quantity_reserved,unit_cost,msrp,active,created_at,updated_at";
+  "id,sku,name,manufacturer_id,description,location,quantity_on_hand,quantity_damaged,quantity_nailed_down,unit_cost,msrp,active,created_at,updated_at";
 
 const inventoryScanCodeColumns =
   "id,inventory_item_id,scan_code,code_type,created_at";
@@ -25006,7 +25006,7 @@ export default function Home() {
                             </select>
                           </label>
                           {item.inventory_item_id && (
-                            <small>Inventory is reserved when this quote becomes a sales order.</small>
+                            <small>Inventory is allocated and deducted from available stock when this quote becomes a sales order.</small>
                           )}
                         </div>
                         <div className="quote-line-grid">
