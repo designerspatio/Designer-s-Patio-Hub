@@ -9462,7 +9462,8 @@ export default function Home() {
     return inventoryItems
       .filter(
         (inventoryItem) =>
-          inventoryItem.active !== false ||
+          (inventoryItem.active !== false &&
+            inventoryAvailableToCurrentSale(inventoryItem.id) > 0) ||
           inventoryItem.id === item.inventory_item_id
       )
       .filter((inventoryItem) => {
