@@ -1,0 +1,27 @@
+name: Apply verified Hub sales workflow changes
+on:
+  push:
+    branches: [feature/hub-sales-workflow-20261106]
+    paths: [.github/workflows/apply-hub-sales.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/hub-sales-workflow-20261106
+          persist-credentials: true
+      - name: Apply tested source and migration changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d scripts/hub-sales-workflow.patch.gz.b64 | gzip -d > /tmp/hub-sales.patch
+          git apply --check /tmp/hub-sales.patch
+          git apply /tmp/hub-sales.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app tests supabase/migrations/20261106_sales_workflow.sql
+          git commit -m "Implement comprehensive sales reporting and fulfillment workflows"
+          git push origin HEAD:feature/hub-sales-workflow-20261106
