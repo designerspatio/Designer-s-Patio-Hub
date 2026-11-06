@@ -30,8 +30,8 @@ export function validateChargeSettings(notes:string) {
   if(s.charges.some(c=>!c.name.trim()||!c.amount.trim()||!Number.isFinite(Number(c.amount))))return 'Each additional charge needs a name and valid amount.';
   return '';
 }
-export function displayOrderNotes(notes:string) {
+export function displayOrderNotes(notes:string, salesOrder=false) {
   const s=readChargeSettings(notes);if(!s)return notes;
-  const tax=s.status==='Tax exempt'?'Tax exempt':s.status==='Manual'?`Sales tax: $${numeric(s.manualTax).toFixed(2)}`:`${s.status} sales tax: ${s.rate}%`;
+  const tax=salesOrder&&s.status==='Out-of-state'?`Out-of-state service charge: ${s.rate}%`:s.status==='Tax exempt'?'Tax exempt':s.status==='Manual'?`Sales tax: $${numeric(s.manualTax).toFixed(2)}`:`${s.status} sales tax: ${s.rate}%`;
   return [plainOrderNotes(notes),tax,...s.charges.map(c=>`${c.name}: $${numeric(c.amount).toFixed(2)}${c.taxable?' (taxable)':''}`)].filter(Boolean).join('\n');
 }

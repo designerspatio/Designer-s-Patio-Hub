@@ -2,6 +2,8 @@
 
 import {availableToSell,validateInventoryCounts,validateQuoteInventory,validateSalesOrderInventory} from "./inventoryAvailability";
 
+import { salesChargeLabel, serviceChargeRange, outOfStateServiceCharge, type ServiceChargePeriod } from "./serviceCharges";
+
 import ChangePassword from "./ChangePassword";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
@@ -640,7 +642,8 @@ type ReportType =
   | "acknowledgement_issues"
   | "vendor_invoice_aging"
   | "expenses"
-  | "daily_cash_summary";
+  | "daily_cash_summary"
+  | "out_of_state_service_charges";
 
 type ReportColumn = {
   key: string;
@@ -782,6 +785,13 @@ const reportDefinitions: Array<{
     icon: "E",
   },
   {
+    type: "out_of_state_service_charges",
+    group: "Operations & Accounting",
+    title: "Out-of-state Service Charges",
+    subtitle: "Daily, monthly and year-to-date charges on sales orders.",
+    icon: "$",
+  },
+  {
     type: "daily_cash_summary",
     group: "Operations & Accounting",
     title: "Daily Cash Summary",
@@ -828,6 +838,8 @@ function reportDefinitionText(type: ReportType) {
       return "Vendor invoices in Open or Approved status. Partial vendor payments are deducted so the report shows the true remaining balance. Paid and Void invoices are excluded.";
     case "expenses":
       return "Recorded operating expenses, with optional date filtering and links back to related manufacturer, PO or sale when present.";
+    case "out_of_state_service_charges":
+      return "Out-of-state service charges on sales orders by order date, within your current My Records / All Access view. Excludes canceled and void orders. YTD runs from January 1 through the selected date; amounts are charges on orders, not payment receipts.";
     case "daily_cash_summary":
       return "Daily Cash batches with system total, reconciled actual total, variance and payment count.";
   }
@@ -2554,6 +2566,8 @@ export default function Home() {
   const [dailyCashNotes, setDailyCashNotes] =
     useState("");
 
+  const [serviceChargePeriod, setServiceChargePeriod] = useState<ServiceChargePeriod>("day");
+  const [serviceChargeDate, setServiceChargeDate] = useState(todayISO());
   const [reportType, setReportType] =
     useState<ReportType>("open_quotes_by_salesperson");
   const [reportSalespersonId, setReportSalespersonId] =
@@ -8237,7 +8251,7 @@ export default function Home() {
       cursorTop += 18;
     }
 
-    const printableNotes = displayOrderNotes(salesPdfForm.notes) + (vendorFreight.length ? "\n" + vendorFreight.map(row => `Freight - ${manufacturers.find(m=>m.id===row.manufacturer_id)?.name || "Vendor"}: ${money(numberOrZero(row.amount))}`).join("\n") : "");
+    const printableNotes = displayOrderNotes(salesPdfForm.notes, true) + (vendorFreight.length ? "\n" + vendorFreight.map(row => `Freight - ${manufacturers.find(m=>m.id===row.manufacturer_id)?.name || "Vendor"}: ${money(numberOrZero(row.amount))}`).join("\n") : "");
     if (printableNotes.trim()) {
       textAt(MARGIN, cursorTop, "ORDER NOTES & CHARGES", 8.2, true, NAVY);
       cursorTop += 14;
@@ -8288,7 +8302,13 @@ export default function Home() {
     rowText("MERCHANDISE", money(salesPdfTotals.merchandise), summaryTop + 14);
     rowText("FREIGHT", money(salesPdfTotals.freight), summaryTop + 34);
     rowText("ADDITIONAL CHARGES", money(salesPdfTotals.adjustment), summaryTop + 54);
-    rowText("SALES TAX", money(salesPdfTotals.tax), summaryTop + 74);
+    if (readChargeSettings(salesPdfForm.notes)?.status === "Out-of-state") {
+      textAt(totalsX + 12, summaryTop + 69, "OUT-OF-STATE", 7.3, false, DARK);
+      textAt(totalsX + 12, summaryTop + 79, "SERVICE CHARGE", 7.3, false, DARK);
+      textAt(totalsX + totalsW - 12, summaryTop + 74, money(salesPdfTotals.tax), 7.3, false, DARK, "right");
+    } else {
+      rowText(salesChargeLabel(salesPdfForm.notes).toUpperCase(), money(salesPdfTotals.tax), summaryTop + 74);
+    }
     lineAt(totalsX + 10, summaryTop + 91, totalsX + totalsW - 10, summaryTop + 91, 0.6, [0.65, 0.7, 0.74]);
     rowText("ORDER TOTAL", money(salesPdfTotals.total), summaryTop + 102, true);
     rowText("PAYMENTS", money(salesPdfTotals.received), summaryTop + 122);
@@ -14185,7 +14205,33 @@ export default function Home() {
         return map;
       };
 
-      if (
+      if (reportType === "out_of_state_service_charges") {
+        if (!supabase) throw new Error("Database connection is unavailable.");
+        const range = serviceChargeRange(serviceChargePeriod, serviceChargeDate);
+        const orders: SalesOrder[] = [];
+        for (let offset = 0; ; offset += 500) {
+          const {data, error} = await supabase.from("sales_orders").select(salesOrderColumns)
+            .gte("order_date", range.start).lte("order_date", range.end)
+            .order("order_date", {ascending:true}).order("id", {ascending:true}).range(offset, offset + 499);
+          if (error) throw new Error(`Could not load service charges: ${error.message}`);
+          orders.push(...(data || []) as SalesOrder[]);
+          if (!data || data.length < 500) break;
+        }
+        const matching = orders.filter(order =>
+          matchesRecordScope(order.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
+          && outOfStateServiceCharge(order) !== 0);
+        const total = matching.reduce((sum, order) => sum + Math.round(outOfStateServiceCharge(order) * 100), 0) / 100;
+        const rows: ReportRow[] = matching.map(order => ({
+          id: order.id, entity_type: "sales_order", entity_id: order.id,
+          cells: {date: order.order_date, sale: `#${order.sale_number}`, client: clientNameById(order.client_id),
+            status: order.status, rate: `${readChargeSettings(order.notes || "")?.rate || "0"}%`, amount: money(outOfStateServiceCharge(order))},
+        }));
+        if (rows.length) rows.push({id:"service-charge-total",entity_type:"none",entity_id:"",cells:{date:"TOTAL",sale:"",client:"",status:"",rate:"",amount:money(total)}});
+        setReportResult({type:reportType,title:"Out-of-state Service Charges",
+          description:`${range.start} through ${range.end} · ${matching.length} sales orders · Total ${money(total)}. Based on order date and current record scope; excludes canceled/void orders.`,
+          columns:[{key:"date",label:"Order Date"},{key:"sale",label:"Sales Order"},{key:"client",label:"Client"},{key:"status",label:"Status"},{key:"rate",label:"Rate",align:"right"},{key:"amount",label:"Service Charge",align:"right"}],
+          rows,generated_at:generatedAt});
+      } else if (
         reportType ===
         "open_quotes_by_salesperson"
       ) {
@@ -19406,6 +19452,15 @@ export default function Home() {
                   </strong>
 
                   <div className="report-filter-row">
+                    {reportType === "out_of_state_service_charges" && (<>
+                      <label><span>Period</span><select value={serviceChargePeriod} onChange={event => {setServiceChargePeriod(event.target.value as ServiceChargePeriod);setReportResult(null);}}>
+                        <option value="day">Day</option><option value="month">Month</option><option value="ytd">Year to date</option>
+                      </select></label>
+                      <label><span>{serviceChargePeriod === "month" ? "Month" : serviceChargePeriod === "ytd" ? "Through date" : "Date"}</span>
+                        <input type={serviceChargePeriod === "month" ? "month" : "date"} value={serviceChargePeriod === "month" ? serviceChargeDate.slice(0,7) : serviceChargeDate}
+                          onChange={event => {setServiceChargeDate(serviceChargePeriod === "month" ? `${event.target.value}-01` : event.target.value);setReportResult(null);}} />
+                      </label>
+                    </>)}
                     {reportUsesSalespersonFilter(
                       reportType
                     ) && (
@@ -25872,7 +25927,7 @@ export default function Home() {
                   </FormField>
                 </div>
 
-                <OrderChargesEditor notes={saleEditForm.notes}
+                <OrderChargesEditor salesOrder notes={saleEditForm.notes}
                   merchandise={saleEditItems.reduce((sum,item)=>sum+numberOrZero(item.quantity)*numberOrZero(item.unit_price),0)}
                   freight={vendorFreightTotal(saleEditVendorFreight)} adjustment={numberOrZero(saleEditForm.adjustment_amount)} tax={numberOrZero(saleEditForm.tax_amount)}
                   clientExempt={Boolean(clients.find(c=>c.id===saleEditForm.client_id)?.tax_exempt)}
@@ -26742,7 +26797,7 @@ export default function Home() {
                   </div>
                   <div><span>Additional charges</span><strong>{money(numberOrZero(selectedSale.adjustment_amount))}</strong></div>
                   <div>
-                    <span>Tax</span>
+                    <span>{salesChargeLabel(selectedSale.notes || "")}</span>
                     <strong>
                       {money(
                         numberOrZero(selectedSale.tax_amount)
