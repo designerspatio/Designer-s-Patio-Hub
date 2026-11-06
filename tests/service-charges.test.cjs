@@ -29,3 +29,9 @@ test('daily, full-month and YTD boundaries include leap day and year transitions
  }
  assert.throws(()=>ctx.serviceChargeRange('day',''));assert.throws(()=>ctx.serviceChargeRange('day','2026-02-30'));
 });
+
+test('full year range includes every calendar date',()=>{
+ const range=ctx.serviceChargeRange('year','2026-11-06');
+ assert.equal(range.start,'2026-01-01');
+ assert.equal(range.end,'2026-12-31');
+});

@@ -1,7 +1,9 @@
 // Company-wide owner reporting is based on recorded sales order lines, not quotations
-// or client deposits. The same merchandise-sales basis is used in all charts.
+// or client deposits. Team and overall sales totals include every sale charge; manufacturer
+// rankings remain merchandise-only to avoid double assigning freight or tax.
 export type OwnerSale = {
   id: string; order_date: string; status: string; salesperson_user_id: string | null;
+  freight_amount?: number | null; adjustment_amount?: number | null; tax_amount?: number | null;
 };
 export type OwnerLine = { manufacturer_id: string | null; quantity: number; unit_price: number };
 export type OwnerQuote = {id: string; status: string; converted_sales_order_id: string | null};
@@ -76,16 +78,17 @@ export function buildOwnerHighlights(input:OwnerInput):OwnerHighlights {
     const day=dateOnly(sale.order_date);
     const lineEntries=saleItems[sale.id]||[];
     const merchandise=lineEntries.reduce((sum,item)=>sum+finite(item.quantity)*finite(item.unit_price),0);
-    if (["Open","On Hold","Ordered","Partially Received"].includes(sale.status)) openOrders++;
-    if(inDateRange(day,previousStart,previousCutoff)) previousYtdSales+=merchandise;
-    if(inDateRange(day,previousMonthStart,previousCutoffMonth)) previousMonthToDate+=merchandise;
+    const fullSale=merchandise+finite(sale.freight_amount)+finite(sale.adjustment_amount)+finite(sale.tax_amount);
+    if (day<=asOf && ["Open","On Hold","Ordered","On Order","Partially Received","Shipped"].includes(sale.status)) openOrders++;
+    if(inDateRange(day,previousStart,previousCutoff)) previousYtdSales+=fullSale;
+    if(inDateRange(day,previousMonthStart,previousCutoffMonth)) previousMonthToDate+=fullSale;
     if(!inDateRange(day,start,asOf))continue;
-    ytdSales+=merchandise;ytdOrders++;
-    if(day>=firstOfMonth){thisMonthSales+=merchandise;thisMonthOrders++;}
-    const mi=Number(day.slice(5,7))-1;if(months[mi]){months[mi].amount+=merchandise;months[mi].orders++;}
+    ytdSales+=fullSale;ytdOrders++;
+    if(day>=firstOfMonth){thisMonthSales+=fullSale;thisMonthOrders++;}
+    const mi=Number(day.slice(5,7))-1;if(months[mi]){months[mi].amount+=fullSale;months[mi].orders++;}
     const personId=sale.salesperson_user_id || "__unassigned__";
     const person=salespersonTotals.get(personId)||{amount:0,count:0};
-    person.amount+=merchandise;person.count++;
+    person.amount+=fullSale;person.count++;
     salespersonTotals.set(personId,person);
     const used=new Set<string>();
     for (const item of lineEntries){

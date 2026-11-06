@@ -20,7 +20,7 @@ export function calculateOrderCharges(notes:string,merchandise:number,freight:nu
   if(!settings)return {additional:legacyAdjustment,tax:legacyTax,total:cents(merchandise+freight+legacyAdjustment+legacyTax)};
   const additional=cents(settings.charges.reduce((n,c)=>n+numeric(c.amount),0));
   const taxable=Math.max(0,merchandise+(settings.taxFreight?freight:0)+settings.charges.filter(c=>c.taxable).reduce((n,c)=>n+numeric(c.amount),0));
-  const tax=settings.status==='Tax exempt'?0:settings.status==='Manual'?Math.max(0,numeric(settings.manualTax)):cents(taxable*Math.min(100,Math.max(0,numeric(settings.rate)))/100);
+  const tax=settings.status==='Tax exempt'?0:settings.status==='Manual'?Math.max(0,numeric(settings.manualTax)):cents(taxable*Math.min(100,Math.max(0,settings.status==='In-state'?8.25:numeric(settings.rate)))/100);
   return {additional,tax,total:cents(merchandise+freight+additional+tax)};
 }
 export function validateChargeSettings(notes:string) {

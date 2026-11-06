@@ -352,6 +352,8 @@ type SalesOrderItem = {
   commissionable: boolean;
   fulfillment_method: "Special Order" | "Inventory";
   inventory_item_id: string | null;
+  posted_out_quantity: number;
+  last_posted_out_at: string | null;
 };
 
 
@@ -406,7 +408,7 @@ const salesOrderColumns =
   "id,sale_number,source_quote_id,client_id,salesperson_user_id,status,order_date,customer_po,notes,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,freight_amount,adjustment_amount,tax_amount,qbo_invoice_id,qbo_sync_token,qbo_synced_at,created_at,updated_at";
 
 const salesOrderItemColumns =
-  "id,sales_order_id,source_quote_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,acknowledged_unit_cost,commissionable,fulfillment_method,inventory_item_id";
+  "id,sales_order_id,source_quote_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,acknowledged_unit_cost,commissionable,fulfillment_method,inventory_item_id,posted_out_quantity,last_posted_out_at";
 
 type VendorFreight = {
   id: string;
@@ -465,6 +467,8 @@ type PurchaseOrderItem = {
   grade: string | null;
   unit_cost: number;
   acknowledged_unit_cost: number | null;
+  received_quantity: number;
+  posted_quantity: number;
   created_at: string;
   updated_at: string;
 };
@@ -486,7 +490,7 @@ const purchaseOrderColumns =
   "id,po_number,sales_order_id,manufacturer_id,status,order_date,acknowledgement_number,acknowledgement_date,estimated_ship_date,actual_ship_date,carrier,tracking_number,freight_amount,notes,created_by,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,created_at,updated_at";
 
 const purchaseOrderItemColumns =
-  "id,purchase_order_id,sales_order_item_id,manufacturer_id,sort_order,quantity,sku,description,finish,fabric_name,grade,unit_cost,acknowledged_unit_cost,created_at,updated_at";
+  "id,purchase_order_id,sales_order_item_id,manufacturer_id,sort_order,quantity,sku,description,finish,fabric_name,grade,unit_cost,acknowledged_unit_cost,received_quantity,posted_quantity,created_at,updated_at";
 
 
 type PurchaseOrderAcknowledgement = {
@@ -643,7 +647,9 @@ type ReportType =
   | "vendor_invoice_aging"
   | "expenses"
   | "daily_cash_summary"
-  | "out_of_state_service_charges";
+  | "out_of_state_service_charges"
+  | "sales_tax_collected"
+  | "sales_freight_charges";
 
 type ReportColumn = {
   key: string;
@@ -785,6 +791,14 @@ const reportDefinitions: Array<{
     icon: "E",
   },
   {
+    type: "sales_tax_collected", group: "Operations & Accounting",
+    title: "Sales Tax", subtitle: "Daily, monthly and yearly tax billed on sales orders.", icon: "$",
+  },
+  {
+    type: "sales_freight_charges", group: "Operations & Accounting",
+    title: "Customer Freight", subtitle: "Daily, monthly and yearly freight billed on sales orders.", icon: "F",
+  },
+  {
     type: "out_of_state_service_charges",
     group: "Operations & Accounting",
     title: "Out-of-state Service Charges",
@@ -838,6 +852,10 @@ function reportDefinitionText(type: ReportType) {
       return "Vendor invoices in Open or Approved status. Partial vendor payments are deducted so the report shows the true remaining balance. Paid and Void invoices are excluded.";
     case "expenses":
       return "Recorded operating expenses, with optional date filtering and links back to related manufacturer, PO or sale when present.";
+    case "sales_tax_collected":
+      return "Sales tax billed on orders by order date; excludes out-of-state service charges and canceled orders.";
+    case "sales_freight_charges":
+      return "Customer freight billed on sales orders by order date; excludes vendor PO freight and canceled orders.";
     case "out_of_state_service_charges":
       return "Out-of-state service charges on sales orders by order date, within your current My Records / All Access view. Excludes canceled and void orders. YTD runs from January 1 through the selected date; amounts are charges on orders, not payment receipts.";
     case "daily_cash_summary":
@@ -2470,6 +2488,8 @@ export default function Home() {
   const [issueResolutionDrafts, setIssueResolutionDrafts] =
     useState<Record<string, string>>({});
 
+  const [receivingPoItemId,setReceivingPoItemId] = useState("");
+  const [postingSaleItemId,setPostingSaleItemId] = useState("");
   const [inventoryItems, setInventoryItems] =
     useState<InventoryItem[]>([]);
   const [ownerStockReceipts, setOwnerStockReceipts] = useState<OwnerStockReceipt[]>([]);
@@ -6736,7 +6756,7 @@ export default function Home() {
       ship_to_state: "",
       ship_to_zip: "",
       delivery_notes: "",
-      notes: "",
+      notes: writeChargeSettings("", {status:"In-state",rate:"8.25",taxFreight:false,manualTax:"0",charges:[]}),
       freight_amount: "0",
       adjustment_amount: "0",
     });
@@ -7690,11 +7710,11 @@ export default function Home() {
     sigText.forEach((entry, index) =>
       textAt(totalsX, sigTop + 16 + index * 8, entry, 6.4, false, DARK)
     );
-    const lineTop = sigTop + 54;
-    lineAt(totalsX, lineTop, totalsX + 125, lineTop, 0.6, DARK);
-    lineAt(totalsX + 145, lineTop, totalsX + totalsW, lineTop, 0.6, DARK);
+    const lineTop = sigTop + 76;
+    lineAt(totalsX, lineTop, totalsX + 143, lineTop, 0.6, DARK);
+    lineAt(totalsX + 161, lineTop, totalsX + totalsW, lineTop, 0.6, DARK);
     textAt(totalsX, lineTop + 5, "CLIENT SIGNATURE", 5.8, true, MID);
-    textAt(totalsX + 145, lineTop + 5, "DATE", 5.8, true, MID);
+    textAt(totalsX + 161, lineTop + 5, "DATE", 5.8, true, MID);
 
     drawFooter();
 
@@ -8325,11 +8345,11 @@ export default function Home() {
     sigText.forEach((entry, index) =>
       textAt(totalsX, sigTop + 16 + index * 8, entry, 6.4, false, DARK)
     );
-    const lineTop = sigTop + 54;
-    lineAt(totalsX, lineTop, totalsX + 125, lineTop, 0.6, DARK);
-    lineAt(totalsX + 145, lineTop, totalsX + totalsW, lineTop, 0.6, DARK);
+    const lineTop = sigTop + 76;
+    lineAt(totalsX, lineTop, totalsX + 143, lineTop, 0.6, DARK);
+    lineAt(totalsX + 161, lineTop, totalsX + totalsW, lineTop, 0.6, DARK);
     textAt(totalsX, lineTop + 5, "CLIENT SIGNATURE", 5.8, true, MID);
-    textAt(totalsX + 145, lineTop + 5, "DATE", 5.8, true, MID);
+    textAt(totalsX + 161, lineTop + 5, "DATE", 5.8, true, MID);
 
     drawFooter();
 
@@ -9810,6 +9830,32 @@ export default function Home() {
           : row
       )
     );
+  }
+
+  async function postOutSaleLine(item: SalesOrderItem) {
+    if (!supabase || !selectedSale || postingSaleItemId || isManufacturerCharge(item)) return;
+    const outstanding=Math.max(0,numberOrZero(item.quantity)-numberOrZero(item.posted_out_quantity));
+    if (!outstanding) return;
+    const available=item.fulfillment_method==="Inventory" ? outstanding
+      : Object.values(purchaseOrderItemsSummary).flat()
+        .filter(po=>po.sales_order_item_id===item.id)
+        .reduce((n,po)=>n+Math.max(0,numberOrZero(po.received_quantity)-numberOrZero(po.posted_quantity)),0);
+    if (available<=0) {setMessage("This sales-order item must be received on a PO before posting out.");return;}
+    const raw=window.prompt(`Post out quantity (up to ${Math.min(outstanding,available)})`,String(Math.min(outstanding,available)));
+    if (raw===null) return;
+    const qty=Number(raw);
+    if (!Number.isSafeInteger(qty)||qty<=0||qty>Math.min(outstanding,available)) {
+      setMessage("Enter a valid received quantity before posting.");return;
+    }
+    setPostingSaleItemId(item.id);
+    const {error}=await supabase.rpc("dp_post_out_sale_item",
+      {p_sales_order_item_id:item.id,p_quantity:qty});
+    if(error) {setMessage("Posting out failed: "+error.message);setPostingSaleItemId("");return;}
+    const {data}=await supabase.from("sales_orders").select(salesOrderColumns).eq("id",selectedSale.id).single();
+    await Promise.all([loadSalesOrders(),loadPurchaseOrders()]);
+    if (data) await openSale(data as SalesOrder);
+    setPostingSaleItemId("");
+    setMessage(`Posted ${qty} unit(s). The sales-order status was updated automatically.`);
   }
 
   async function saveSaleEdits() {
@@ -11683,6 +11729,28 @@ export default function Home() {
     setMessage("Acknowledgement deleted.");
   }
 
+  async function receivePurchaseOrderLine(item: PurchaseOrderItem) {
+    if (!supabase || !selectedPurchaseOrder || receivingPoItemId) return;
+    const outstanding = Math.max(0,numberOrZero(item.quantity)-numberOrZero(item.received_quantity));
+    if (!outstanding) return;
+    const raw = window.prompt(`Receive quantity for ${item.sku || item.description || "PO item"} (up to ${outstanding})`,String(outstanding));
+    if (raw === null) return;
+    const qty = Number(raw);
+    if (!Number.isSafeInteger(qty) || qty<1 || qty>outstanding) {
+      setMessage(`Enter a whole number between 1 and ${outstanding}.`);return;
+    }
+    setReceivingPoItemId(item.id);
+    const {error} = await supabase.rpc("dp_receive_po_line",
+      {p_purchase_order_item_id:item.id,p_quantity:qty});
+    if (error) {setMessage("Could not receive PO item: "+error.message);setReceivingPoItemId("");return;}
+    const {data} = await supabase.from("purchase_orders").select(purchaseOrderColumns)
+      .eq("id",selectedPurchaseOrder.id).single();
+    await Promise.all([loadPurchaseOrders(),loadSalesOrders()]);
+    if (data) await openPurchaseOrder(data as PurchaseOrder);
+    setReceivingPoItemId("");
+    setMessage(`Received ${qty} unit(s) on PO #${selectedPurchaseOrder.po_number}.`);
+  }
+
   async function savePurchaseOrder() {
     if (!supabase || !selectedPurchaseOrder || !purchaseOrderForm) {
       return;
@@ -12020,7 +12088,17 @@ export default function Home() {
       }
     }
 
-    await loadPurchaseOrders();
+    if (createdCount > 0 || updatedCount > 0) {
+      const {data: updatedSale, error: saleStatusError} = await supabase
+        .from("sales_orders").update({status:"On Order",updated_at:new Date().toISOString()})
+        .eq("id",selectedSale.id).eq("status","Open")
+        .select(salesOrderColumns).maybeSingle();
+      if (saleStatusError) {
+        setMessage("Purchase orders were generated but the sales order status could not be updated: "+saleStatusError.message);
+      }
+      if (updatedSale) setSelectedSale(updatedSale as SalesOrder);
+    }
+    await Promise.all([loadPurchaseOrders(),loadSalesOrders()]);
     setGeneratingPurchaseOrders(false);
 
     let resultMessage = "";
@@ -14205,7 +14283,7 @@ export default function Home() {
         return map;
       };
 
-      if (reportType === "out_of_state_service_charges") {
+      if (["out_of_state_service_charges","sales_tax_collected","sales_freight_charges"].includes(reportType)) {
         if (!supabase) throw new Error("Database connection is unavailable.");
         const range = serviceChargeRange(serviceChargePeriod, serviceChargeDate);
         const orders: SalesOrder[] = [];
@@ -14217,19 +14295,26 @@ export default function Home() {
           orders.push(...(data || []) as SalesOrder[]);
           if (!data || data.length < 500) break;
         }
+        const chargeLabel = reportType==="sales_tax_collected" ? "Sales Tax" :
+          reportType==="sales_freight_charges" ? "Freight" : "Out-of-state Service Charge";
+        const amountFor = (order: SalesOrder) => reportType==="sales_freight_charges"
+          ? numberOrZero(order.freight_amount) : reportType==="sales_tax_collected"
+            ? readChargeSettings(order.notes||"")?.status==="Out-of-state" ? 0 : numberOrZero(order.tax_amount)
+            : outOfStateServiceCharge(order);
         const matching = orders.filter(order =>
-          matchesRecordScope(order.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
-          && outOfStateServiceCharge(order) !== 0);
-        const total = matching.reduce((sum, order) => sum + Math.round(outOfStateServiceCharge(order) * 100), 0) / 100;
+          !["cancelled","canceled","void","voided"].includes((order.status||"").toLowerCase()) &&
+          matchesRecordScope(order.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId) &&
+          amountFor(order)!==0);
+        const total = matching.reduce((sum,order)=>sum+Math.round(amountFor(order)*100),0)/100;
         const rows: ReportRow[] = matching.map(order => ({
           id: order.id, entity_type: "sales_order", entity_id: order.id,
           cells: {date: order.order_date, sale: `#${order.sale_number}`, client: clientNameById(order.client_id),
-            status: order.status, rate: `${readChargeSettings(order.notes || "")?.rate || "0"}%`, amount: money(outOfStateServiceCharge(order))},
+            status: order.status, rate: reportType==="out_of_state_service_charges" ? `${readChargeSettings(order.notes||"")?.rate||"0"}%` : reportType==="sales_tax_collected" ? "8.25% / configured" : "—", amount: money(amountFor(order))},
         }));
         if (rows.length) rows.push({id:"service-charge-total",entity_type:"none",entity_id:"",cells:{date:"TOTAL",sale:"",client:"",status:"",rate:"",amount:money(total)}});
-        setReportResult({type:reportType,title:"Out-of-state Service Charges",
+        setReportResult({type:reportType,title:reportTypeLabel(reportType),
           description:`${range.start} through ${range.end} · ${matching.length} sales orders · Total ${money(total)}. Based on order date and current record scope; excludes canceled/void orders.`,
-          columns:[{key:"date",label:"Order Date"},{key:"sale",label:"Sales Order"},{key:"client",label:"Client"},{key:"status",label:"Status"},{key:"rate",label:"Rate",align:"right"},{key:"amount",label:"Service Charge",align:"right"}],
+          columns:[{key:"date",label:"Order Date"},{key:"sale",label:"Sales Order"},{key:"client",label:"Client"},{key:"status",label:"Status"},{key:"rate",label:"Rate",align:"right"},{key:"amount",label:chargeLabel,align:"right"}],
           rows,generated_at:generatedAt});
       } else if (
         reportType ===
@@ -19452,11 +19537,11 @@ export default function Home() {
                   </strong>
 
                   <div className="report-filter-row">
-                    {reportType === "out_of_state_service_charges" && (<>
+                    {["out_of_state_service_charges","sales_tax_collected","sales_freight_charges"].includes(reportType) && (<>
                       <label><span>Period</span><select value={serviceChargePeriod} onChange={event => {setServiceChargePeriod(event.target.value as ServiceChargePeriod);setReportResult(null);}}>
-                        <option value="day">Day</option><option value="month">Month</option><option value="ytd">Year to date</option>
+                        <option value="day">Day</option><option value="month">Month</option><option value="ytd">Year to date</option><option value="year">Full year</option>
                       </select></label>
-                      <label><span>{serviceChargePeriod === "month" ? "Month" : serviceChargePeriod === "ytd" ? "Through date" : "Date"}</span>
+                      <label><span>{serviceChargePeriod === "month" ? "Month" : serviceChargePeriod === "ytd" ? "Through date" : serviceChargePeriod === "year" ? "Year (select a date)" : "Date"}</span>
                         <input type={serviceChargePeriod === "month" ? "month" : "date"} value={serviceChargePeriod === "month" ? serviceChargeDate.slice(0,7) : serviceChargeDate}
                           onChange={event => {setServiceChargeDate(serviceChargePeriod === "month" ? `${event.target.value}-01` : event.target.value);setReportResult(null);}} />
                       </label>
@@ -23381,6 +23466,51 @@ export default function Home() {
                   </div>
                 )}
 
+                <section style={{marginTop:20,padding:18,border:"1px solid #d5dfe7",borderRadius:12}}>
+                  <div className="quote-card-title">Client Quotes & Sales History</div>
+                  <div style={{display:"grid",gap:16,marginTop:12}}>
+                    <div>
+                      <strong>Open Quotes</strong>
+                      {scopedQuotes.filter(q => q.client_id === selectedClient.id &&
+                        !["Archived","Converted","Declined","Cancelled","Canceled"].includes(q.status)).length === 0 &&
+                        <p>No open quotes.</p>}
+                      {scopedQuotes.filter(q => q.client_id===selectedClient.id &&
+                        !["Archived","Converted","Declined","Cancelled","Canceled"].includes(q.status))
+                        .map(q=><button type="button" key={q.id} className="new-client-button"
+                          style={{display:"block",marginTop:6}} onClick={()=>{
+                            setClientModalOpen(false);setView("quotes");void openQuote(q);
+                          }}>Quote #{q.quote_number} · {q.status} · {q.quote_date}</button>)}
+                    </div>
+                    <div>
+                      <strong>Archived & Historical Quotes</strong>
+                      {scopedQuotes.filter(q => q.client_id===selectedClient.id &&
+                        ["Archived","Converted","Declined","Cancelled","Canceled"].includes(q.status))
+                        .map(q=><button type="button" key={q.id} className="new-client-button"
+                          style={{display:"block",marginTop:6}} onClick={()=>{
+                            setClientModalOpen(false);setView("quotes");void openQuote(q);
+                          }}>Quote #{q.quote_number} · {q.status} · {q.quote_date}</button>)}
+                    </div>
+                    <div>
+                      <strong>Open Sales Orders</strong>
+                      {scopedSalesOrders.filter(o => o.client_id===selectedClient.id &&
+                        !["Closed","Cancelled","Canceled","Void"].includes(o.status))
+                        .map(o=><button type="button" key={o.id} className="new-client-button"
+                          style={{display:"block",marginTop:6}} onClick={()=>{
+                            setClientModalOpen(false);setView("sales");void openSale(o);
+                          }}>Sale #{o.sale_number} · {o.status} · {o.order_date}</button>)}
+                    </div>
+                    <div>
+                      <strong>Sales History</strong>
+                      {scopedSalesOrders.filter(o => o.client_id===selectedClient.id &&
+                        ["Closed","Cancelled","Canceled","Void"].includes(o.status))
+                        .map(o=><button type="button" key={o.id} className="new-client-button"
+                          style={{display:"block",marginTop:6}} onClick={()=>{
+                            setClientModalOpen(false);setView("sales");void openSale(o);
+                          }}>Sale #{o.sale_number} · {o.status} · {o.order_date}</button>)}
+                    </div>
+                  </div>
+                </section>
+
                 <section className="client-qbo-panel">
                   <div className="client-qbo-heading">
                     <div>
@@ -25797,7 +25927,9 @@ export default function Home() {
                     >
                       <option value="Open">Open</option>
                       <option value="On Hold">On Hold</option>
-                      <option value="Ordered">Ordered</option>
+                      <option value="On Order">On Order</option>
+                      <option value="Ordered">Ordered (legacy)</option>
+                      <option value="Shipped">Shipped</option>
                       <option value="Partially Received">
                         Partially Received
                       </option>
@@ -26693,6 +26825,19 @@ export default function Home() {
                       </span>
                     </div>
 
+                    {!isManufacturerCharge(item) && (
+                      <div style={{display:"grid",gap:5,minWidth:150}}>
+                        <small>
+                          {numberOrZero(item.posted_out_quantity)>=numberOrZero(item.quantity)
+                            ? "Shipped" : `Posted: ${numberOrZero(item.posted_out_quantity)} / ${item.quantity}`}
+                        </small>
+                        {numberOrZero(item.posted_out_quantity)<numberOrZero(item.quantity) &&
+                          <button type="button" className="new-client-button" disabled={Boolean(postingSaleItemId)}
+                            onClick={()=>void postOutSaleLine(item)}>
+                            {postingSaleItemId===item.id?"Posting...":"Post Out"}
+                          </button>}
+                      </div>
+                    )}
                     <div className="sale-item-money">
                       <span>EXT.</span>
                       <strong>{money(ext)}</strong>
@@ -27544,6 +27689,19 @@ export default function Home() {
                           <span>QTY</span>
                           <strong>{item.quantity}</strong>
                         </div>
+                        {!isManufacturerCharge(item) && item.sales_order_item_id && (
+                          <div style={{display:"grid",gap:5,minWidth:135}}>
+                            <small>Received: {numberOrZero(item.received_quantity)} / {item.quantity}</small>
+                            <small>Posted: {numberOrZero(item.posted_quantity)}</small>
+                            {numberOrZero(item.received_quantity) < numberOrZero(item.quantity) &&
+                              <button type="button" className="new-client-button"
+                                disabled={Boolean(receivingPoItemId)}
+                                onClick={()=>void receivePurchaseOrderLine(item)}>
+                                {receivingPoItemId===item.id?"Receiving...":"Receive Items"}
+                              </button>}
+                          </div>
+                        )}
+
 
                         <div className="po-item-number">
                           <span>
