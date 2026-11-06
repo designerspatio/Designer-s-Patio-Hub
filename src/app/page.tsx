@@ -15,6 +15,7 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
+import {defaultQuoteSalesperson,salespersonOptionName} from "./quoteSalesperson";
 import StockPurchaseOrders from "./StockPurchaseOrders";
 import { type StockOrder, type StockOrderReceived } from "./stockOrders";
 import type { OwnerStockReceipt } from "./ownerInventory";
@@ -6801,7 +6802,7 @@ export default function Home() {
       const newClient=data as Client;
       setClients(current=>current.some(client=>client.id===newClient.id)?current:[...current,newClient]);
       setQuoteForm(current=>({...current,client_id:newClient.id,
-        salesperson_user_id:current.salesperson_user_id||newClient.assigned_user_id||""}));
+        salesperson_user_id:defaultQuoteSalesperson(newClient.assigned_user_id,profile?.id)}));
       setQuoteNewClientOpen(false);
       setQuoteNewClientDuplicateId("");
       setMessage(`${clientName} was added to Clients and selected for this quote. Continue your quote and save it when ready.`);
@@ -6819,7 +6820,7 @@ export default function Home() {
     setQuoteNewClientDuplicateId("");
     setQuoteForm({
       client_id: "",
-      salesperson_user_id: profile?.id || "",
+      salesperson_user_id: defaultQuoteSalesperson(null,profile?.id),
       status: "Draft",
       quote_date: todayISO(),
       expiration_date: plusDaysISO(1),
@@ -24159,7 +24160,7 @@ export default function Home() {
                       <option value="">Unassigned</option>
                       {team.map((person) => (
                         <option key={person.id} value={person.id}>
-                          {person.display_name}
+                          {salespersonOptionName(person)}
                         </option>
                       ))}
                     </select>
@@ -24956,12 +24957,15 @@ export default function Home() {
                   <FormField label="Client" wide>
                     <select
                       value={quoteForm.client_id}
-                      onChange={(e) =>
-                        updateQuoteForm(
-                          "client_id",
-                          e.target.value
-                        )
-                      }
+                      onChange={(e) => {
+                        const id=e.target.value;
+                        const chosen=clients.find(client=>client.id===id);
+                        setQuoteForm(current=>({
+                          ...current,
+                          client_id:id,
+                          salesperson_user_id:defaultQuoteSalesperson(chosen?.assigned_user_id,profile?.id),
+                        }));
+                      }}
                     >
                       <option value="">Choose client...</option>
                       {clients.filter((client) => client.active !== false || client.id === quoteForm.client_id).map((client) => (
@@ -25003,7 +25007,7 @@ export default function Home() {
                           <select value={quoteNewClientForm.assigned_user_id} disabled={quoteNewClientSaving}
                             onChange={event=>setQuoteNewClientForm(current=>({...current,assigned_user_id:event.target.value}))}>
                             <option value="">Unassigned</option>
-                            {team.map(person=><option key={person.id} value={person.id}>{person.display_name}</option>)}
+                            {team.map(person=><option key={person.id} value={person.id}>{salespersonOptionName(person)}</option>)}
                           </select>
                         </FormField>
                         <FormField label="Tax Exempt">
@@ -25026,7 +25030,10 @@ export default function Home() {
                             if (match && match.active===false) {
                               setQuoteNewClientError("This client is inactive. Reactivate them in Clients before quoting.");return;
                             }
-                            setQuoteForm(current=>({...current,client_id:quoteNewClientDuplicateId}));
+                            setQuoteForm(current=>({...current,
+                              client_id:quoteNewClientDuplicateId,
+                              salesperson_user_id:defaultQuoteSalesperson(match?.assigned_user_id,profile?.id)
+                            }));
                             setQuoteNewClientOpen(false);setQuoteNewClientError("");setQuoteNewClientDuplicateId("");
                             setMessage("Existing client selected. You can continue the quote.");
                           }}>
@@ -25058,7 +25065,7 @@ export default function Home() {
                       <option value="">Unassigned</option>
                       {team.map((person) => (
                         <option key={person.id} value={person.id}>
-                          {person.display_name}
+                          {salespersonOptionName(person)}
                         </option>
                       ))}
                     </select>
