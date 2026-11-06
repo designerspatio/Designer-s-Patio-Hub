@@ -2779,6 +2779,11 @@ export default function Home() {
   const [clientMode, setClientMode] = useState<ClientMode>("view");
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [clientForm, setClientForm] = useState<ClientForm>(blankForm);
+  const [quoteNewClientOpen,setQuoteNewClientOpen] = useState(false);
+  const [quoteNewClientForm,setQuoteNewClientForm] = useState<ClientForm>(blankForm);
+  const [quoteNewClientSaving,setQuoteNewClientSaving] = useState(false);
+  const [quoteNewClientError,setQuoteNewClientError] = useState("");
+  const [quoteNewClientDuplicateId,setQuoteNewClientDuplicateId] = useState("");
   const [savingClient, setSavingClient] = useState(false);
   const [scanValue, setScanValue] = useState("");
   const [scanResult, setScanResult] = useState<ScannedClient | null>(null);
@@ -6739,8 +6744,79 @@ export default function Home() {
     return client ? getClientName(client) : "Unknown client";
   }
 
+  function openQuoteNewClient() {
+    setQuoteNewClientForm({...blankForm,assigned_user_id:quoteForm.salesperson_user_id || profile?.id || ""});
+    setQuoteNewClientError("");
+    setQuoteNewClientDuplicateId("");
+    setQuoteNewClientOpen(true);
+  }
+
+  async function createClientFromQuote() {
+    if (!supabase || quoteNewClientSaving) return;
+    const form=quoteNewClientForm;
+    const clientName=form.client_name.trim();
+    const email=form.email.trim().toLowerCase();
+    const phone=form.phone.trim();
+    if (!clientName) {setQuoteNewClientError("Enter a client name.");return;}
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setQuoteNewClientError("Enter a valid email address.");return;
+    }
+    // Check current list and query fresh database results, avoiding a stale-client-list duplicate.
+    setQuoteNewClientSaving(true);
+    setQuoteNewClientError("");
+    try {
+      const {data: existing,error: lookupError}=await supabase.from("clients")
+        .select(clientColumns).order("client_name",{ascending:true});
+      if (lookupError) throw new Error(lookupError.message);
+      const normalizedName=clientName.toLocaleLowerCase().replace(/\s+/g," ");
+      const normalizedPhone=phone.replace(/\D/g,"");
+      const matches=((existing||[]) as Client[]).filter(client=>{
+        const sameEmail=Boolean(email && client.email?.trim().toLowerCase()===email);
+        const samePhone=Boolean(normalizedPhone && client.phone?.replace(/\D/g,"")===normalizedPhone);
+        const sameName=(client.client_name||getClientName(client)).trim().toLocaleLowerCase().replace(/\s+/g," ")===normalizedName;
+        return sameEmail || (sameName && (samePhone || !email || !client.email));
+      });
+      if (matches.length) {
+        const match=matches[0];
+        setClients(current=>current.some(client=>client.id===match.id)?current:[...current,match]);
+        setQuoteNewClientDuplicateId(match.id);
+        setQuoteNewClientError(`A client named ${getClientName(match)} may already exist. Select the existing client or correct the information before creating another.`);
+        return;
+      }
+      const {data,error}=await supabase.from("clients").insert({
+        client_name:clientName,
+        email:email||null,
+        phone:phone||null,
+        street_address:form.street_address.trim()||null,
+        city:form.city.trim()||null,
+        state:form.state.trim().toUpperCase()||null,
+        zip_code:form.zip_code.trim()||null,
+        assigned_user_id:form.assigned_user_id||null,
+        notes:form.notes.trim()||null,
+        tax_exempt:form.tax_exempt,
+        active:true,
+        updated_at:new Date().toISOString()
+      }).select(clientColumns).single();
+      if(error || !data) throw new Error(error?.message||"Client was not returned after saving.");
+      const newClient=data as Client;
+      setClients(current=>current.some(client=>client.id===newClient.id)?current:[...current,newClient]);
+      setQuoteForm(current=>({...current,client_id:newClient.id,
+        salesperson_user_id:current.salesperson_user_id||newClient.assigned_user_id||""}));
+      setQuoteNewClientOpen(false);
+      setQuoteNewClientDuplicateId("");
+      setMessage(`${clientName} was added to Clients and selected for this quote. Continue your quote and save it when ready.`);
+    } catch(error) {
+      setQuoteNewClientError(error instanceof Error?error.message:"Could not save client.");
+    } finally {
+      setQuoteNewClientSaving(false);
+    }
+  }
+
   function resetQuoteEditor() {
     setSelectedQuote(null);
+    setQuoteNewClientOpen(false);
+    setQuoteNewClientError("");
+    setQuoteNewClientDuplicateId("");
     setQuoteForm({
       client_id: "",
       salesperson_user_id: profile?.id || "",
@@ -6771,6 +6847,8 @@ export default function Home() {
 
   async function openQuote(quote: Quote) {
     if (!supabase) return;
+    setQuoteNewClientOpen(false);
+    setQuoteNewClientError("");
 
     setSelectedQuote(quote);
     setQuoteForm({
@@ -6855,7 +6933,8 @@ export default function Home() {
   }
 
   function closeQuoteEditor() {
-    if (savingQuote) return;
+    if (savingQuote || quoteNewClientSaving) return;
+    setQuoteNewClientOpen(false);
     setQuoteEditorOpen(false);
     setSelectedQuote(null);
   }
@@ -24893,6 +24972,79 @@ export default function Home() {
                     </select>
                   </FormField>
 
+                  <div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"flex-end",marginTop:-8,marginBottom:6}}>
+                    <button type="button" className="new-client-button"
+                      onClick={()=>quoteNewClientOpen?setQuoteNewClientOpen(false):openQuoteNewClient()}
+                      disabled={quoteNewClientSaving}>
+                      {quoteNewClientOpen?"Cancel New Client":"+ New Client"}
+                    </button>
+                  </div>
+                  {quoteNewClientOpen && (
+                    <section style={{gridColumn:"1 / -1",padding:18,border:"1px solid #b7c9db",
+                      borderRadius:12,background:"var(--panel, #f7f9fc)",display:"grid",gap:12}}>
+                      <div>
+                        <strong>Add client without leaving this quote</strong>
+                        <p style={{fontSize:12,margin:"4px 0 0"}}>Save their details to Clients, then continue working on this quote.</p>
+                      </div>
+                      <div className="form-grid">
+                        {([
+                          ["client_name","Client Name *"],["email","Email"],["phone","Phone"],
+                          ["street_address","Street Address"],["city","City"],
+                          ["state","State"],["zip_code","ZIP Code"]
+                        ] as const).map(([key,label])=>(
+                          <FormField key={key} label={label} wide={key==="client_name"||key==="street_address"}>
+                            <input value={quoteNewClientForm[key]} disabled={quoteNewClientSaving}
+                              type={key==="email"?"email":"text"}
+                              onChange={event=>{setQuoteNewClientForm(current=>({...current,[key]:event.target.value}));
+                                setQuoteNewClientDuplicateId("");setQuoteNewClientError("");}}/>
+                          </FormField>
+                        ))}
+                        <FormField label="Assigned Salesperson">
+                          <select value={quoteNewClientForm.assigned_user_id} disabled={quoteNewClientSaving}
+                            onChange={event=>setQuoteNewClientForm(current=>({...current,assigned_user_id:event.target.value}))}>
+                            <option value="">Unassigned</option>
+                            {team.map(person=><option key={person.id} value={person.id}>{person.display_name}</option>)}
+                          </select>
+                        </FormField>
+                        <FormField label="Tax Exempt">
+                          <label style={{display:"flex",gap:8,alignItems:"center"}}>
+                            <input type="checkbox" checked={quoteNewClientForm.tax_exempt}
+                              onChange={event=>setQuoteNewClientForm(current=>({...current,tax_exempt:event.target.checked}))}/>
+                            Exempt from sales tax
+                          </label>
+                        </FormField>
+                        <FormField label="Notes" wide>
+                          <textarea rows={2} value={quoteNewClientForm.notes}
+                            onChange={event=>setQuoteNewClientForm(current=>({...current,notes:event.target.value}))}/>
+                        </FormField>
+                      </div>
+                      {quoteNewClientError && <p role="alert" style={{color:"#a33138",margin:0}}>{quoteNewClientError}</p>}
+                      {quoteNewClientDuplicateId && (
+                        <button className="modal-secondary" type="button" disabled={quoteNewClientSaving}
+                          onClick={()=>{
+                            const match=clients.find(client=>client.id===quoteNewClientDuplicateId);
+                            if (match && match.active===false) {
+                              setQuoteNewClientError("This client is inactive. Reactivate them in Clients before quoting.");return;
+                            }
+                            setQuoteForm(current=>({...current,client_id:quoteNewClientDuplicateId}));
+                            setQuoteNewClientOpen(false);setQuoteNewClientError("");setQuoteNewClientDuplicateId("");
+                            setMessage("Existing client selected. You can continue the quote.");
+                          }}>
+                          Use Existing Client
+                        </button>
+                      )}
+                      <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+                        <button className="modal-secondary" type="button" disabled={quoteNewClientSaving}
+                          onClick={()=>{setQuoteNewClientOpen(false);setQuoteNewClientError("");}}>
+                          Cancel
+                        </button>
+                        <button className="modal-primary" type="button" disabled={quoteNewClientSaving}
+                          onClick={()=>void createClientFromQuote()}>
+                          {quoteNewClientSaving?"Saving Client...":"Save Client & Select"}
+                        </button>
+                      </div>
+                    </section>
+                  )}
                   <FormField label="Salesperson">
                     <select
                       value={quoteForm.salesperson_user_id}
