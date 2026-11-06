@@ -67,9 +67,9 @@ export default function OwnerDashboard(props:Props) {
   const monthName=new Date(today+"T12:00:00").toLocaleDateString("en-US",{month:"long"});
   const bestMaker=data.topManufacturers[0],bestRep=data.salespeople[0];
   const highlights=[
-    data.ytdOrders>0 ? `${data.ytdOrders} sales ${data.ytdOrders===1?"order has":"orders have"} been booked this year, averaging ${currency(data.averageOrder)} in merchandise per order.` : "No booked sales orders are recorded for this year yet.",
+    data.ytdOrders>0 ? `${data.ytdOrders} sales ${data.ytdOrders===1?"order has":"orders have"} been booked this year, averaging ${currency(data.averageOrder)} per order, including all charges.` : "No booked sales orders are recorded for this year yet.",
     bestMaker ? `${bestMaker.name} leads the manufacturer mix with ${currency(bestMaker.amount)} in YTD merchandise sales.` : "Manufacturer rankings will appear once sales orders have items.",
-    bestRep ? `${bestRep.name} leads the team with ${currency(bestRep.amount)} in YTD merchandise sales.` : "Salesperson rankings will appear when sales are recorded.",
+    bestRep ? `${bestRep.name} leads the team with ${currency(bestRep.amount)} in YTD total sales.` : "Salesperson rankings will appear when sales are recorded.",
     `${data.openOrders} active sales ${data.openOrders===1?"order is":"orders are"} in progress.`
   ];
   async function refresh(){
@@ -95,10 +95,10 @@ export default function OwnerDashboard(props:Props) {
       <button onClick={props.onReports}>Reports →</button>
     </div>
     <section className={styles.metrics} aria-label="Business performance indicators">
-      <div className={styles.metric}><span>YTD NET MERCHANDISE SALES</span><strong>{currency(data.ytdSales)}</strong><small>{data.hasComparison && data.previousYtdSales>0 ? `${data.ytdSales>=data.previousYtdSales?"▲":"▼"} ${Math.abs((data.ytdSales-data.previousYtdSales)/data.previousYtdSales*100).toFixed(1)}% vs same period last year` : "Booked sales orders, before freight and tax"}</small></div>
+      <div className={styles.metric}><span>YTD TOTAL SALES</span><strong>{currency(data.ytdSales)}</strong><small>{data.hasComparison && data.previousYtdSales>0 ? `${data.ytdSales>=data.previousYtdSales?"▲":"▼"} ${Math.abs((data.ytdSales-data.previousYtdSales)/data.previousYtdSales*100).toFixed(1)}% vs same period last year` : "All charges on booked sales orders, including freight, service charges and tax"}</small></div>
       <div className={styles.metric}><span>{monthName.toUpperCase()} SALES TO DATE</span><strong>{currency(data.thisMonthSales)}</strong><small>{data.thisMonthOrders} {data.thisMonthOrders===1?"order":"orders"} booked this month</small></div>
       <div className={styles.metric}><span>YTD SALES ORDERS</span><strong>{data.ytdOrders.toLocaleString()}</strong><small>Booked sales orders this year</small></div>
-      <div className={styles.metric}><span>AVERAGE ORDER VALUE</span><strong>{currency(data.averageOrder)}</strong><small>Booked merchandise sales per YTD order</small></div>
+      <div className={styles.metric}><span>AVERAGE ORDER VALUE</span><strong>{currency(data.averageOrder)}</strong><small>Total billed sales per YTD order</small></div>
     </section>
     <section aria-label="Personal checklist and notes" className={styles.workspaceBlock}>
       <div className={styles.personalIntro}><div className={styles.eyebrow}>YOUR PERSONAL WORKSPACE</div><h2>Checklist & notes</h2><p>Your private task list and notepad are right here when you open your dashboard. They save to your existing Hub workspace.</p></div>
@@ -146,6 +146,6 @@ export default function OwnerDashboard(props:Props) {
       </div>
       <button className={styles.linkButton} onClick={props.onAccounting}>View accounting →</button>
     </section>
-    <p className={styles.method}>Sales are assigned to the order date and the salesperson on each sales order. Manufacturer rankings use each line’s net selling price × quantity. Figures reflect Hub records available to this login and are not a cash-received or accounting profit report.</p>
+    <p className={styles.method}>Sales include merchandise, freight, service charges, adjustments and tax, assigned by sales-order date and salesperson. Manufacturer rankings remain merchandise-only because order-level charges do not belong to one manufacturer. Figures reflect Hub records available to this login and are not a cash-received or accounting profit report.</p>
   </div>;
 }

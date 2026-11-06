@@ -23,3 +23,9 @@ test('validation rejects missing rate and malformed charges, allows explicit zer
 test('changing freight recalculates tax and exempt retains charges',()=>{
  const notes=writeChargeSettings('',settings);assert.equal(calculateOrderCharges(notes,1000,200,0).tax,103.13);const ex=calculateOrderCharges(writeChargeSettings('',{...settings,status:'Tax exempt'}),1000,200,0);assert.equal(ex.additional,70);assert.equal(ex.total,1270);
 });
+
+test('Texas in-state tax is always 8.25 percent regardless of old saved rate',()=>{
+ const notes=writeChargeSettings('',{status:'In-state',rate:'6.25',taxFreight:false,manualTax:'0',charges:[]});
+ const result=calculateOrderCharges(notes,200,10,0);
+ assert.equal(result.tax,16.5);
+});

@@ -11,9 +11,9 @@ const {buildOwnerHighlights,isBookedSale,isOpenQuote}=context.module.exports;
 const data={
  today:"2026-11-04",
  sales:[
-  {id:"a",order_date:"2026-01-15",status:"Open",salesperson_user_id:"one"},
-  {id:"b",order_date:"2026-10-30",status:"Ordered",salesperson_user_id:"two"},
-  {id:"c",order_date:"2026-11-03",status:"Complete",salesperson_user_id:"one"},
+  {id:"a",order_date:"2026-01-15",status:"Open",salesperson_user_id:"one",freight_amount:50,adjustment_amount:10,tax_amount:25},
+  {id:"b",order_date:"2026-10-30",status:"Ordered",salesperson_user_id:"two",freight_amount:70,tax_amount:75},
+  {id:"c",order_date:"2026-11-03",status:"Complete",salesperson_user_id:"one",adjustment_amount:35},
   {id:"d",order_date:"2026-11-05",status:"Open",salesperson_user_id:"zero"},
   {id:"e",order_date:"2026-10-15",status:"Cancelled",salesperson_user_id:"zero"},
   {id:"f",order_date:"2025-11-03",status:"Closed",salesperson_user_id:"one"},
@@ -38,8 +38,8 @@ const data={
 };
 test("owner YTD totals only booked sales through today, excluding cancelled, draft, future and prior year",()=>{
  const r=buildOwnerHighlights(data);
- assert.equal(r.ytdSales,1550); assert.equal(r.ytdOrders,3);
- assert.equal(r.thisMonthSales,400);
+ assert.equal(r.ytdSales,1815); assert.equal(r.ytdOrders,3);
+ assert.equal(r.thisMonthSales,435);
  assert.equal(r.previousYtdSales,500);
  assert.equal(r.openOrders,2);
  assert.equal(r.openQuotes,1); assert.equal(r.openQuoteValue,400);
@@ -51,16 +51,16 @@ test("five top manufacturers ranked by net line value, and only people with sale
  assert.equal(r.topManufacturers[0].amount,950);
  assert.equal(r.topManufacturers[1].amount,600);
  assert.deepEqual(Array.from(r.salespeople,x=>x.name),["Shawna","Geneva"]);
- assert.equal(r.salespeople[0].amount,900);
- assert.equal(r.salespeople[1].amount,650);
- assert.equal(r.totalManufacturerSales,r.ytdSales);
+ assert.equal(r.salespeople[0].amount,1045);
+ assert.equal(r.salespeople[1].amount,770);
+ assert.equal(r.totalManufacturerSales,1550);
  assert.equal(r.totalTeamSales,r.ytdSales);
 });
 test("owner gets month-by-month and upcoming vendor risk from recorded payments",()=>{
  const r=buildOwnerHighlights(data);
- assert.equal(r.months[0].amount,250);
- assert.equal(r.months[9].amount,900);
- assert.equal(r.months[10].amount,400);
+ assert.equal(r.months[0].amount,335);
+ assert.equal(r.months[9].amount,1045);
+ assert.equal(r.months[10].amount,435);
  assert.equal(r.openVendorBalance,700);
  assert.equal(r.billsDueSoon,1);
  assert.equal(r.dueSoonBalance,400);
