@@ -994,16 +994,6 @@ const dailyCashBatchPaymentColumns =
 const dailyCashTenderTotalColumns =
   "id,daily_cash_batch_id,payment_method,system_amount,actual_amount,variance_amount,notes,created_at,updated_at";
 
-function localDateRange(dateString: string) {
-  const start = new Date(`${dateString}T00:00:00`);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  return {
-    start: start.toISOString(),
-    end: end.toISOString(),
-  };
-}
 
 
 type AccountingSection = "invoices" | "expenses" | "quickbooks";
@@ -2538,6 +2528,7 @@ export default function Home() {
   ] = useState<Record<string, string>>({});
 
 
+  const [dailyCashPendingPayments, setDailyCashPendingPayments] = useState<Payment[]>([]);
   const [dailyCashBatches, setDailyCashBatches] =
     useState<DailyCashBatch[]>([]);
   const [dailyCashBatchSummaries, setDailyCashBatchSummaries] =
@@ -3778,13 +3769,14 @@ export default function Home() {
   const loadDailyCashBatches = useCallback(async () => {
     if (!supabase || !session?.user?.id) {
       setDailyCashBatches([]);
+      setDailyCashPendingPayments([]);
       setDailyCashBatchSummaries({});
       return;
     }
 
     setDailyCashLoading(true);
 
-    const [batchResult, tenderResult, linkResult] =
+    const [batchResult, tenderResult, linkResult, pendingResult] =
       await Promise.all([
         supabase
           .from("daily_cash_batches")
@@ -3797,6 +3789,7 @@ export default function Home() {
         supabase
           .from("daily_cash_batch_payments")
           .select(dailyCashBatchPaymentColumns),
+        supabase.from("payments").select(paymentColumns).eq("posted", false),
       ]);
 
     if (batchResult.error) {
@@ -3822,6 +3815,13 @@ export default function Home() {
       setDailyCashLoading(false);
       return;
     }
+
+    if (pendingResult.error) {
+      setMessage(`Could not load unposted payments: ${pendingResult.error.message}`);
+      setDailyCashLoading(false);
+      return;
+    }
+    setDailyCashPendingPayments((pendingResult.data || []) as Payment[]);
 
     const batches =
       (batchResult.data || []) as DailyCashBatch[];
@@ -10370,7 +10370,7 @@ export default function Home() {
       );
     }
 
-    await loadSalePayments(selectedSale.id);
+    await Promise.all([loadSalePayments(selectedSale.id), loadDailyCashBatches()]);
     setPaymentFormOpen(false);
     setSelectedPayment(null);
     setCorrectionReason("");
@@ -10386,7 +10386,7 @@ export default function Home() {
 
     if (!confirmed) return;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("payments")
       .update({
         posted: true,
@@ -10395,15 +10395,18 @@ export default function Home() {
         updated_at: new Date().toISOString(),
       })
       .eq("id", payment.id)
-      .eq("posted", false);
+      .eq("posted", false)
+      .select("id")
+      .single();
 
-    if (error) {
-      setMessage(`Could not post payment: ${error.message}`);
+    if (error || !data) {
+      setMessage(`Could not post payment: ${error?.message || "Payment was not updated. Refresh and try again."}`);
       return;
     }
 
     await loadSalePayments(payment.sales_order_id);
-    setMessage("Payment posted.");
+    await loadDailyCashBatches();
+    setMessage(`Payment posted for ${payment.payment_date}. Open a Daily Cash batch for that date to reconcile it.`);
   }
 
   async function deleteUnpostedPayment(payment: Payment) {
@@ -10426,7 +10429,7 @@ export default function Home() {
       return;
     }
 
-    await loadSalePayments(payment.sales_order_id);
+    await Promise.all([loadSalePayments(payment.sales_order_id), loadDailyCashBatches()]);
     setMessage("Unposted payment deleted.");
   }
 
@@ -17796,11 +17799,20 @@ export default function Home() {
   async function openDailyCashBatch(
     batch: DailyCashBatch
   ) {
+    setDailyCashBatchPayments([]);
+    setDailyCashTenderTotals([]);
+    setDailyCashTenderDrafts({});
     setSelectedDailyCashBatch(batch);
     setDailyCashDate(batch.business_date);
     setDailyCashNotes(batch.notes || "");
     setMessage("");
-    await loadDailyCashBatchDetails(batch);
+    if (batch.status === "Open") {
+      setDailyCashDetailLoading(true);
+      await syncDailyCashBatchPayments(batch, false, false);
+      setDailyCashDetailLoading(false);
+    } else {
+      await loadDailyCashBatchDetails(batch);
+    }
   }
 
   async function createOrOpenDailyCashBatch() {
@@ -17847,9 +17859,10 @@ export default function Home() {
 
   async function syncDailyCashBatchPayments(
     batch: DailyCashBatch,
-    showMessage = true
+    showMessage = true,
+    preserveDrafts = true
   ) {
-    if (!supabase) return [] as Payment[];
+    if (!supabase) return null;
 
     if (batch.status === "Posted") {
       if (showMessage) {
@@ -17857,20 +17870,17 @@ export default function Home() {
           "Posted Daily Cash batches are locked. Payment corrections will appear in a later open batch."
         );
       }
-      return dailyCashBatchPayments;
+      return null;
     }
 
     setDailyCashSyncing(true);
-
-    const range = localDateRange(batch.business_date);
 
     const { data: candidateData, error: candidateError } =
       await supabase
         .from("payments")
         .select(paymentColumns)
         .eq("posted", true)
-        .gte("posted_at", range.start)
-        .lt("posted_at", range.end)
+        .eq("payment_date", batch.business_date)
         .order("posted_at", { ascending: true });
 
     if (candidateError) {
@@ -17878,7 +17888,7 @@ export default function Home() {
       window.alert(
         `Could not find posted payments: ${candidateError.message}`
       );
-      return dailyCashBatchPayments;
+      return null;
     }
 
     const candidates = (candidateData || []) as Payment[];
@@ -17899,7 +17909,7 @@ export default function Home() {
         window.alert(
           `Could not check batched payments: ${linkedError.message}`
         );
-        return dailyCashBatchPayments;
+        return null;
       }
 
       const alreadyLinked = new Set(
@@ -17927,7 +17937,7 @@ export default function Home() {
           window.alert(
             `Could not add payments to Daily Cash: ${insertError.message}`
           );
-          return dailyCashBatchPayments;
+          return null;
         }
       }
     }
@@ -17944,7 +17954,7 @@ export default function Home() {
       window.alert(
         `Could not reload Daily Cash links: ${linkError.message}`
       );
-      return dailyCashBatchPayments;
+      return null;
     }
 
     const links =
@@ -17965,23 +17975,22 @@ export default function Home() {
         window.alert(
           `Could not reload Daily Cash payments: ${error.message}`
         );
-        return dailyCashBatchPayments;
+        return null;
       }
 
       batchPayments = (data || []) as Payment[];
     }
 
-    const existingTenderRows =
-      dailyCashTenderTotals.length > 0
-        ? dailyCashTenderTotals
-        : (
-            (
-              await supabase
-                .from("daily_cash_tender_totals")
-                .select(dailyCashTenderTotalColumns)
-                .eq("daily_cash_batch_id", batch.id)
-            ).data || []
-          ) as DailyCashTenderTotal[];
+    const { data: existingTenderData, error: existingTenderError } = await supabase
+      .from("daily_cash_tender_totals")
+      .select(dailyCashTenderTotalColumns)
+      .eq("daily_cash_batch_id", batch.id);
+    if (existingTenderError) {
+      setDailyCashSyncing(false);
+      window.alert(`Could not load tender totals: ${existingTenderError.message}`);
+      return null;
+    }
+    const existingTenderRows = (existingTenderData || []) as DailyCashTenderTotal[];
 
     const tenderPayloads = paymentMethods.map(
       (method) => {
@@ -18001,7 +18010,9 @@ export default function Home() {
         );
 
         const currentDraft =
-          dailyCashTenderDrafts[method];
+          preserveDrafts && selectedDailyCashBatch?.id === batch.id
+            ? dailyCashTenderDrafts[method]
+            : undefined;
 
         const actualAmount =
           currentDraft != null
@@ -18040,7 +18051,7 @@ export default function Home() {
       window.alert(
         `Could not refresh tender totals: ${tenderError.message}`
       );
-      return batchPayments;
+      return null;
     }
 
     setDailyCashBatchPayments(batchPayments);
@@ -18182,6 +18193,18 @@ export default function Home() {
       return;
     }
 
+    const { data: pending, error: pendingError } = await supabase
+      .from("payments").select("id,amount")
+      .eq("payment_date", selectedDailyCashBatch.business_date).eq("posted", false);
+    if (pendingError) {
+      window.alert(`Could not check unposted payments: ${pendingError.message}`);
+      return;
+    }
+    if (pending?.length) {
+      window.alert(`${pending.length} customer payment(s) totaling ${money(pending.reduce((sum, p) => sum + numberOrZero(p.amount), 0))} are still unposted for this date. Open each Sales Order → Payments and click Post on the payment first. Posting Daily Cash locks the reconciliation; it does not post customer payments.`);
+      return;
+    }
+
     const confirmed = window.confirm(
       `Post Daily Cash #${selectedDailyCashBatch.batch_number}? After posting, this batch is locked. Future payment corrections will be recorded in a later batch.`
     );
@@ -18195,6 +18218,15 @@ export default function Home() {
         selectedDailyCashBatch,
         false
       );
+    if (!syncedPayments) {
+      setPostingDailyCash(false);
+      return;
+    }
+    if (syncedPayments.length === 0) {
+      setPostingDailyCash(false);
+      window.alert("No posted customer payments were found for this date. Post the payments from their Sales Orders before locking Daily Cash.");
+      return;
+    }
 
     const tenderPayloads = paymentMethods.map(
       (method) => {
@@ -19146,7 +19178,7 @@ export default function Home() {
                   </div>
                   <h1>Daily Cash</h1>
                   <p>
-                    Gather posted payments by business date,
+                    Gather posted payments by their entered payment date,
                     reconcile each tender, then lock the batch.
                   </p>
                 </div>
@@ -19265,6 +19297,9 @@ export default function Home() {
                             <strong>
                               {money(summary.total)}
                             </strong>
+                            {dailyCashPendingPayments.some(p => p.payment_date === batch.business_date) && (
+                              <small>{money(dailyCashPendingPayments.filter(p => p.payment_date === batch.business_date).reduce((sum, p) => sum + numberOrZero(p.amount), 0))} awaiting payment posting</small>
+                            )}
                           </div>
 
                           <div className="chevron">›</div>
@@ -28424,6 +28459,12 @@ export default function Home() {
               </div>
             ) : (
               <>
+                {dailyCashPendingPayments.some(p => p.payment_date === selectedDailyCashBatch.business_date) && (
+                  <div className="daily-cash-help" role="status">
+                    <strong>{money(dailyCashPendingPayments.filter(p => p.payment_date === selectedDailyCashBatch.business_date).reduce((sum, p) => sum + numberOrZero(p.amount), 0))} in customer payments still unposted.</strong>
+                    <span>Open each Sales Order → Payments and click Post on the payment. Posting Daily Cash only locks the reconciliation. {selectedDailyCashBatch.status === "Posted" ? "This batch is locked; after posting the payments, use Open / Create Batch for this same date to reconcile them in a new batch." : "Then refresh posted payments here."}</span>
+                  </div>
+                )}
                 <div className="daily-cash-summary-strip">
                   <div>
                     <span>STATUS</span>
