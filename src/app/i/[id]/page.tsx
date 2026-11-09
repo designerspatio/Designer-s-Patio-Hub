@@ -24,7 +24,6 @@ export default async function InventoryTearSheet({params}:{params:Promise<{id:st
  <h1 style={{fontSize:28,margin:'0 0 24px 0'}}>{item.item_name}</h1>
  {item.item_image_url&&<img src={item.item_image_url} alt={item.item_name} style={{display:'block',width:'100%',maxWidth:590,maxHeight:430,objectFit:'contain',margin:'0 auto 32px'}}/>}
  {field('Item name',item.item_name)}{field('Dimensions',item.item_dimensions)}
- <div style={{borderTop:'1px solid #d6e0e7',paddingTop:16,fontSize:12,color:'#60768b'}}>Designer's Patio • Dallas Design District • 214-217-9997</div>
  <div className="print-action" style={{marginTop:24}}><PrintButton/></div>
  </article><style>{'@media print{body{background:white!important}.print-action{display:none!important}main{background:white!important;padding:0!important}article{box-shadow:none!important;max-width:100%!important}}'}</style></main>;
 }
