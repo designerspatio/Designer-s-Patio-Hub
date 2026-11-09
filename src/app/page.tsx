@@ -499,6 +499,7 @@ type PurchaseOrderAcknowledgement = {
   purchase_order_id: string;
   file_name: string | null;
   file_path: string | null;
+  expected_ship_date: string | null;
   vendor_name_detected: string | null;
   po_number_detected: string | null;
   comparison_status: string | null;
@@ -510,7 +511,7 @@ type PurchaseOrderAcknowledgement = {
 };
 
 const purchaseOrderAcknowledgementColumns =
-  "id,purchase_order_id,file_name,file_path,vendor_name_detected,po_number_detected,comparison_status,comparison_summary,comparison_details,created_by,created_at,updated_at";
+  "id,purchase_order_id,file_name,file_path,expected_ship_date,vendor_name_detected,po_number_detected,comparison_status,comparison_summary,comparison_details,created_by,created_at,updated_at";
 
 
 type PurchaseOrderAcknowledgementIssue = {
@@ -2336,6 +2337,8 @@ export default function Home() {
   const [clientArchiveView, setClientArchiveView] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const canGenerateSalesPO = Boolean(profile?.active !== false && ["17b37a5d-1774-46fe-ae3a-b3ce76671e02", "1e670fd1-6576-4d63-a8d4-d828c8a98025"].includes(profile?.id || ""));
+  const canCorrectPostedCash = Boolean(profile?.active !== false && ["17b37a5d-1774-46fe-ae3a-b3ce76671e02", "a31a3c72-7f3d-4b62-a61a-04442c20c896"].includes(profile?.id || ""));
   const [dashboardDirty, setDashboardDirty] = useState(false);
   const [recordScope, setRecordScope] = useState<RecordScope>("mine");
   const [scopeSalespersonId, setScopeSalespersonId] = useState("");
@@ -11607,6 +11610,16 @@ export default function Home() {
     );
   }
 
+  async function saveAcknowledgementShipDate(ack: PurchaseOrderAcknowledgement, date: string) {
+    if (!supabase) return;
+    const {error} = await supabase.from("purchase_order_acknowledgements")
+      .update({expected_ship_date: date || null, updated_at: new Date().toISOString()}).eq("id", ack.id);
+    if (error) { window.alert("Could not save expected ship date: " + error.message); return; }
+    setPurchaseOrderAcknowledgements(items => items.map(item => item.id === ack.id ? {...item, expected_ship_date: date || null} : item));
+    setAcknowledgementLibrary(items => items.map(item => item.id === ack.id ? {...item, expected_ship_date: date || null} : item));
+    await loadPurchaseOrders();
+    setMessage("Expected ship date saved and linked to the sale.");
+  }
   async function uploadPurchaseOrderAcknowledgement(
     file: File
   ) {
@@ -11884,6 +11897,7 @@ export default function Home() {
   }
 
   async function generatePurchaseOrdersFromSale() {
+    if (!canGenerateSalesPO) { window.alert("Only Joey or Geneva may generate POs from sales orders."); return; }
     if (!supabase || !selectedSale) {
       window.alert(
         "Open a sales order before generating purchase orders."
@@ -22746,6 +22760,10 @@ export default function Home() {
                               {order.customer_po
                                 ? ` • PO ${order.customer_po}`
                                 : ""}
+                              {!["Closed","Cancelled","Canceled","Void"].includes(order.status) && (() => {
+                                const dates = purchaseOrders.filter(po => po.sales_order_id === order.id && po.estimated_ship_date).map(po => po.estimated_ship_date as string).sort();
+                                return dates.length ? ` • Est. ship ${dates[dates.length - 1]}` : "";
+                              })()}
                             </span>
                           </div>
 
@@ -25802,21 +25820,6 @@ export default function Home() {
                             <strong>{money(extended)}</strong>
                           </div>
                           <div>
-                            <span>Expected Cost</span>
-                            <strong>
-                              {item.expected_unit_cost == null
-                                ? "Factor needed"
-                                : money(expectedExtended)}
-                            </strong>
-                          </div>
-                          <div>
-                            <span>Factor</span>
-                            <strong>
-                              {item.purchasing_factor_snapshot ??
-                                "—"}
-                            </strong>
-                          </div>
-                          <div>
                             <span>Tariff</span>
                             <strong>
                               {numberOrZero(
@@ -25991,7 +25994,7 @@ export default function Home() {
               <div className="sale-header-actions">
                 {!saleEditMode && (
                   <>
-                    <button
+                    {canGenerateSalesPO && <button
                       type="button"
                       className="generate-po-button"
                       onClick={generatePurchaseOrdersFromSale}
@@ -26000,7 +26003,7 @@ export default function Home() {
                       {generatingPurchaseOrders
                         ? "Generating..."
                         : "Generate POs"}
-                    </button>
+                    </button>}
                     <button
                       className="download-sale-button"
                       onClick={downloadSalesOrderPdf}
@@ -27991,6 +27994,11 @@ export default function Home() {
                             </div>
                           </div>
 
+                          <label style={{display:"grid",gap:4,minWidth:180}}>
+                            <span>Expected ship date</span>
+                            <input type="date" value={acknowledgement.expected_ship_date || ""}
+                              onChange={(event) => void saveAcknowledgementShipDate(acknowledgement, event.target.value)} />
+                          </label>
                           <div className="po-ack-actions">
                             <button
                               type="button"
