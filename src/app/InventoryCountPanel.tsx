@@ -86,7 +86,8 @@ export default function InventoryCountPanel({supabase,items}:{supabase:SupabaseC
    await new Promise(resolve=>setTimeout(resolve,100));
    const {Html5Qrcode}=await import("html5-qrcode");
    const s=new Html5Qrcode("dp-qr-camera",{verbose:false});scanner.current=s;
-   await s.start({facingMode:"environment"},{fps:8,qrbox:{width:210,height:210}},code=>{void record(code,true)},()=>{});
+   lastCamera.current={value:"",time:0};
+   await s.start({facingMode:"environment"},{fps:8,qrbox:{width:210,height:210}},code=>{void (async()=>{await record(code,true);await closeCamera()})()},()=>{});
    setCameraOn(true);
   }catch(e){setMessage("Camera could not start. Use the scanner input instead: "+String(e));await closeCamera();}
  };
