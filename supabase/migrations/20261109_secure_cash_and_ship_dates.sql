@@ -61,25 +61,43 @@ CREATE OR REPLACE FUNCTION public.dp_guard_cash_correction()
  LANGUAGE plpgsql
  SET search_path TO ''
 AS $function$
-declare batch_status text;
+declare
+ v_previous_status text;
+ v_target_status text;
+ v_locked boolean;
 begin
-  if tg_table_name='daily_cash_batches' then
-    if tg_op in ('UPDATE','DELETE') and lower(old.status) in ('posted','closed') 
-       and not public.dp_can_correct_posted_cash() then
-       raise exception 'Only Geneva or Accounting Team may correct a posted Daily Cash batch'
-         using errcode='42501';
-    end if;
-  else
-    select b.status into batch_status from public.daily_cash_batches b
-    where b.id = case when tg_op='DELETE' then old.daily_cash_batch_id else new.daily_cash_batch_id end;
-    if lower(coalesce(batch_status,'')) in ('posted','closed')
-        and not public.dp_can_correct_posted_cash() then
-        raise exception 'Only Geneva or Accounting Team may correct a posted Daily Cash batch'
-          using errcode='42501';
-    end if;
-  end if;
-  if tg_op='DELETE' then return old; end if;
-  return new;
+ if tg_table_name = 'daily_cash_batches' then
+   if tg_op <> 'INSERT' then
+     v_previous_status := lower(coalesce(old.status,''));
+     if v_previous_status in ('posted','closed') then
+       if tg_op='UPDATE' and new.status is distinct from old.status then
+         raise exception 'Posted Daily Cash status cannot be reopened; use an authorized correction'
+           using errcode='42501';
+       end if;
+       if not public.dp_can_correct_posted_cash() then
+         raise exception 'Only Geneva or Accounting Team may correct a posted Daily Cash batch'
+           using errcode='42501';
+       end if;
+     end if;
+   end if;
+ else
+   if tg_op <> 'INSERT' then
+     select lower(b.status) into v_previous_status
+     from public.daily_cash_batches b where b.id=old.daily_cash_batch_id;
+   end if;
+   if tg_op <> 'DELETE' then
+     select lower(b.status) into v_target_status
+     from public.daily_cash_batches b where b.id=new.daily_cash_batch_id;
+   end if;
+   v_locked := coalesce(v_previous_status,'') in ('posted','closed')
+     or coalesce(v_target_status,'') in ('posted','closed');
+   if v_locked and not public.dp_can_correct_posted_cash() then
+     raise exception 'Only Geneva or Accounting Team may correct a posted Daily Cash batch'
+       using errcode='42501';
+   end if;
+ end if;
+ if tg_op='DELETE' then return old; end if;
+ return new;
 end $function$;
 
 DROP TRIGGER IF EXISTS dp_guard_posted_daily_cash ON public.daily_cash_batches;
@@ -115,18 +133,34 @@ CREATE OR REPLACE FUNCTION public.dp_sync_ack_expected_ship_date()
  LANGUAGE plpgsql
  SET search_path TO ''
 AS $function$
+declare v_po_id uuid;
+declare v_latest date;
 begin
- if new.expected_ship_date is not null and
-    (tg_op='INSERT' or new.expected_ship_date is distinct from old.expected_ship_date) then
-   update public.purchase_orders set
-     estimated_ship_date=new.expected_ship_date,
-     updated_at=now()
-   where id=new.purchase_order_id;
+ v_po_id := case when tg_op='DELETE' then old.purchase_order_id else new.purchase_order_id end;
+ if tg_op='INSERT' and new.expected_ship_date is null then return new; end if;
+ if tg_op='UPDATE' and new.expected_ship_date is not distinct from old.expected_ship_date
+     and new.purchase_order_id is not distinct from old.purchase_order_id then return new; end if;
+ select a.expected_ship_date into v_latest
+ from public.purchase_order_acknowledgements a
+ where a.purchase_order_id=v_po_id and a.expected_ship_date is not null
+ order by a.updated_at desc nulls last,a.created_at desc,a.id desc limit 1;
+ update public.purchase_orders set estimated_ship_date=v_latest,updated_at=now()
+ where id=v_po_id;
+ if tg_op='UPDATE' and old.purchase_order_id is distinct from new.purchase_order_id
+     and old.expected_ship_date is not null then
+   select a.expected_ship_date into v_latest
+   from public.purchase_order_acknowledgements a
+   where a.purchase_order_id=old.purchase_order_id and a.expected_ship_date is not null
+   order by a.updated_at desc nulls last,a.created_at desc,a.id desc limit 1;
+   update public.purchase_orders set estimated_ship_date=v_latest,updated_at=now()
+   where id=old.purchase_order_id;
  end if;
+ if tg_op='DELETE' then return old; end if;
  return new;
 end $function$;
+
 DROP TRIGGER IF EXISTS dp_sync_ack_expected_ship_date ON public.purchase_order_acknowledgements;
-CREATE TRIGGER dp_sync_ack_expected_ship_date AFTER INSERT OR UPDATE OF expected_ship_date
+CREATE TRIGGER dp_sync_ack_expected_ship_date AFTER INSERT OR UPDATE OF expected_ship_date,purchase_order_id OR DELETE
 ON public.purchase_order_acknowledgements FOR EACH ROW
 EXECUTE FUNCTION public.dp_sync_ack_expected_ship_date();
 
