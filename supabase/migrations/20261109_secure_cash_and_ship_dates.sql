@@ -255,4 +255,47 @@ FROM public.sales_orders so LEFT JOIN public.purchase_orders po ON po.sales_orde
 GROUP BY so.id;
 REVOKE ALL ON public.dp_sales_order_ship_dates FROM anon;
 GRANT SELECT ON public.dp_sales_order_ship_dates TO authenticated;
+CREATE OR REPLACE FUNCTION public.dp_guard_posted_cash_payment()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO ''
+AS $function$
+declare v_locked boolean := false;
+begin
+ if tg_op <> 'INSERT' then
+   select exists(
+     select 1 from public.daily_cash_batch_payments bp
+     join public.daily_cash_batches b on b.id=bp.daily_cash_batch_id
+     where bp.payment_id=old.id and lower(b.status) in ('posted','closed')
+   ) into v_locked;
+   if old.reversal_of_payment_id is not null or old.correction_of_payment_id is not null then
+     v_locked := v_locked or exists(
+       select 1 from public.daily_cash_batch_payments bp
+       join public.daily_cash_batches b on b.id=bp.daily_cash_batch_id
+       where bp.payment_id in (old.reversal_of_payment_id,old.correction_of_payment_id)
+         and lower(b.status) in ('posted','closed')
+     );
+   end if;
+ end if;
+ if tg_op <> 'DELETE' then
+   if new.reversal_of_payment_id is not null or new.correction_of_payment_id is not null then
+     v_locked := v_locked or exists(
+       select 1 from public.daily_cash_batch_payments bp
+       join public.daily_cash_batches b on b.id=bp.daily_cash_batch_id
+       where bp.payment_id in (new.reversal_of_payment_id,new.correction_of_payment_id)
+         and lower(b.status) in ('posted','closed')
+     );
+   end if;
+ end if;
+ if v_locked and not public.dp_can_correct_posted_cash() then
+   raise exception 'Only Geneva or Accounting Team may change a payment tied to posted Daily Cash'
+   using errcode='42501';
+ end if;
+ if tg_op='DELETE' then return old; end if;
+ return new;
+end $function$;
+DROP TRIGGER IF EXISTS dp_guard_posted_cash_payment ON public.payments;
+CREATE TRIGGER dp_guard_posted_cash_payment BEFORE INSERT OR UPDATE OR DELETE
+ON public.payments FOR EACH ROW EXECUTE FUNCTION public.dp_guard_posted_cash_payment();
+
 COMMIT;
