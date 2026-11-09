@@ -17,4 +17,14 @@ export default async function InventoryTearSheet({params}:{params:Promise<{id:st
  const field=(k:string,v:string|null|undefined)=><div style={{marginBottom:18}}><div style={{fontSize:11,color:'#52657b',letterSpacing:2,textTransform:'uppercase'}}>{k}</div><div style={{fontSize:18,marginTop:4}}>{v?.trim()||'Not listed'}</div></div>;
  return <main style={{background:'#f4f7fa',color:'#13273d',minHeight:'100vh',padding:'30px 15px',fontFamily:'Arial,sans-serif'}}>
  <article style={{background:'white',maxWidth:750,margin:'auto',padding:'36px 40px',boxShadow:'0 4px 26px #142e431a'}}>
- <header style={{borderBottom:'2px solid #164473',paddingBottom:18,marginBottom:28,display:'flex',justifyContent:'space-between',alignItems:'center',gap:20,flexWrap:'w¶»§q«^
+ <header style={{borderBottom:'2px solid #164473',paddingBottom:18,marginBottom:28,display:'flex',justifyContent:'space-between',alignItems:'center',gap:20,flexWrap:'wrap'}}>
+ <img src={DP_PDF_LOGO_DATA_URL} alt="Designer's Patio" style={{width:220,maxHeight:150,objectFit:'contain'}}/>
+ <div style={{textAlign:'right',fontSize:13,lineHeight:1.7}}>Interior Home Design Center<br/>2000 N Stemmons Fwy, Suite 1D110<br/>Dallas, Texas<br/><a href="tel:2142179997" style={{color:'#164473'}}>214-217-9997</a></div>
+ </header>
+ <h1 style={{fontSize:28,margin:'0 0 24px 0'}}>{item.item_name}</h1>
+ {item.item_image_url&&<img src={item.item_image_url} alt={item.item_name} style={{display:'block',width:'100%',maxWidth:590,maxHeight:430,objectFit:'contain',margin:'0 auto 32px'}}/>}
+ {field('Item name',item.item_name)}{field('Dimensions',item.item_dimensions)}
+ <div style={{borderTop:'1px solid #d6e0e7',paddingTop:16,fontSize:12,color:'#60768b'}}>Designer's Patio â€¢ Dallas Design District â€¢ 214-217-9997</div>
+ <div className="print-action" style={{marginTop:24}}><PrintButton/></div>
+ </article><style>{'@media print{body{background:white!important}.print-action{display:none!important}main{background:white!important;padding:0!important}article{box-shadow:none!important;max-width:100%!important}}'}</style></main>;
+}
