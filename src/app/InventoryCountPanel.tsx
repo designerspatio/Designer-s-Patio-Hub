@@ -50,7 +50,10 @@ export default function InventoryCountPanel({supabase,items}:{supabase:SupabaseC
  };
  const record=async(raw:string,fromCamera=false)=>{
   if(locked.current||!supabase||!selected||selected.status!=="In Progress")return;
-  const id=itemIdFromScan(raw)||items.find(i=>i.sku?.toLowerCase()===raw.trim().toLowerCase())?.id;
+  const parsedId=itemIdFromScan(raw);
+  const skuMatches=parsedId?[]:lines.filter(l=>l.sku_snapshot?.trim().toLowerCase()===raw.trim().toLowerCase());
+  if(!parsedId && skuMatches.length>1){setMessage("More than one inventory item uses this SKU. Scan the item's unique QR tag instead.");return;}
+  const id=parsedId||(skuMatches.length===1?skuMatches[0].inventory_item_id:null);
   const line=lines.find(l=>l.inventory_item_id===id);
   if(!line){setMessage("This code is not in this count. Scan a tag included in the starting snapshot.");return;}
   if(fromCamera){const now=Date.now();if(lastCamera.current.value===raw&&now-lastCamera.current.time<2500)return;lastCamera.current={value:raw,time:now};}
