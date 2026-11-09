@@ -13,14 +13,16 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
+    "html5-qrcode": "2.3.8",
     "next": "latest",
+    "qrcode.react": "4.2.0",
     "react": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
-    "typescript": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/react-dom": "latest",
+    "typescript": "latest"
   }
 }
