@@ -18318,11 +18318,16 @@ export default function Home() {
   async function saveDailyCashReconciliation() {
     if (!supabase || !selectedDailyCashBatch) return;
 
-    if (selectedDailyCashBatch.status === "Posted") {
-      window.alert(
-        "This Daily Cash batch is posted and locked."
-      );
+    const correctingPosted = selectedDailyCashBatch.status === "Posted";
+    if (correctingPosted && !canCorrectPostedCash) {
+      window.alert("Only Geneva or Accounting Team may correct a posted Daily Cash batch.");
       return;
+    }
+    let postedCorrectionReason = "";
+    if (correctingPosted) {
+      postedCorrectionReason = window.prompt("Required reason for correcting posted Daily Cash:")?.trim() || "";
+      if (!postedCorrectionReason) { window.alert("A reason is required."); return; }
+      if (!window.confirm("Correct this posted batch? This action will be recorded in the audit history.")) return;
     }
 
     const tenderPayloads = paymentMethods.map(
@@ -18370,7 +18375,9 @@ export default function Home() {
         supabase
           .from("daily_cash_batches")
           .update({
-            notes: dailyCashNotes.trim() || null,
+            notes: correctingPosted
+              ? [dailyCashNotes.trim(), "[CORRECTION " + new Date().toISOString() + " by " + (profile?.display_name || "Authorized user") + "] " + postedCorrectionReason].filter(Boolean).join("\n")
+              : (dailyCashNotes.trim() || null),
             updated_at: new Date().toISOString(),
           })
           .eq("id", selectedDailyCashBatch.id)
@@ -19564,6 +19571,38 @@ export default function Home() {
                   </p>
                 </div>
               </div>
+
+              <section className="report-group" aria-label="Transaction Verification Center">
+                <div className="report-group-title">
+                  <strong>Transaction Verification Center</strong>
+                  <span>Live exceptions • Unpaid balances intentionally excluded</span>
+                </div>
+                {(() => {
+                  const pending = dailyCashPendingPayments.filter(payment => !payment.posted);
+                  const emptyCash = dailyCashBatches.filter(batch => batch.status === "Open" && (dailyCashBatchSummaries[batch.id]?.paymentCount || 0) === 0);
+                  const missingPO = salesOrders.filter(order =>
+                    !["Closed","Cancelled","Canceled","Void"].includes(order.status) &&
+                    (salesItemsSummary[order.id] || []).some(item => item.fulfillment_method === "Special Order") &&
+                    !purchaseOrders.some(po => po.sales_order_id === order.id));
+                  const latePO = purchaseOrders.filter(po => po.estimated_ship_date && po.estimated_ship_date < todayISO() && !["Received","Shipped","Closed","Cancelled","Canceled","Void"].includes(po.status));
+                  return (
+                    <div className="report-picker-grid">
+                      <button className="report-picker-card" onClick={() => setView("daily_cash")}>
+                        <div className="report-picker-icon">!</div><div><strong>{pending.length} Unposted customer payments</strong><span>Review posting status in the related sales orders</span></div>
+                      </button>
+                      <button className="report-picker-card" onClick={() => setView("daily_cash")}>
+                        <div className="report-picker-icon">!</div><div><strong>{emptyCash.length} Open Daily Cash batches with no linked payments</strong><span>Confirm each batch is intentional or ready to reconcile</span></div>
+                      </button>
+                      <button className="report-picker-card" onClick={() => setView("sales")}>
+                        <div className="report-picker-icon">!</div><div><strong>{missingPO.length} Special-order sales without purchase orders</strong><span>Review ordering and fulfillment; no unpaid-balance flags</span></div>
+                      </button>
+                      <button className="report-picker-card" onClick={() => setView("purchase_orders")}>
+                        <div className="report-picker-icon">!</div><div><strong>{latePO.length} Purchase orders beyond estimated ship date</strong><span>Check vendor updates and acknowledgement dates</span></div>
+                      </button>
+                    </div>
+                  );
+                })()}
+              </section>
 
               {([
                 "Core Exceptions",
@@ -28916,7 +28955,7 @@ export default function Home() {
                   {selectedDailyCashBatch.status ===
                     "Posted" && (
                     <div className="daily-cash-lock">
-                      🔒 Posted and locked
+                      {canCorrectPostedCash ? "Posted • Authorized corrections permitted" : "🔒 Posted and locked"}
                     </div>
                   )}
                 </div>
@@ -28979,7 +29018,7 @@ export default function Home() {
                         </div>
 
                         {selectedDailyCashBatch.status ===
-                        "Posted" ? (
+                        "Posted" && !canCorrectPostedCash ? (
                           <div className="daily-cash-money">
                             {money(actualAmount)}
                           </div>
@@ -29013,7 +29052,7 @@ export default function Home() {
                         </div>
 
                         {selectedDailyCashBatch.status ===
-                        "Posted" ? (
+                        "Posted" && !canCorrectPostedCash ? (
                           <div className="daily-cash-note-read">
                             {dailyCashTenderDrafts[
                               method
@@ -29122,7 +29161,7 @@ export default function Home() {
                 <div className="daily-cash-notes">
                   <span>BATCH NOTES</span>
                   {selectedDailyCashBatch.status ===
-                  "Posted" ? (
+                  "Posted" && !canCorrectPostedCash ? (
                     <p>{dailyCashNotes || "—"}</p>
                   ) : (
                     <textarea
@@ -29146,8 +29185,7 @@ export default function Home() {
                     Close
                   </button>
 
-                  {selectedDailyCashBatch.status ===
-                    "Open" && (
+                  {(selectedDailyCashBatch.status === "Open" || (selectedDailyCashBatch.status === "Posted" && canCorrectPostedCash)) && (
                     <>
                       <button
                         className="daily-cash-save-button"
@@ -29159,10 +29197,10 @@ export default function Home() {
                           postingDailyCash
                         }
                       >
-                        Save Reconciliation
+                        {selectedDailyCashBatch.status === "Posted" ? "Save Posted Correction" : "Save Reconciliation"}
                       </button>
 
-                      <button
+                      {selectedDailyCashBatch.status === "Open" && <button
                         className="modal-primary"
                         onClick={postDailyCashBatch}
                         disabled={
@@ -29173,7 +29211,7 @@ export default function Home() {
                         {postingDailyCash
                           ? "Posting..."
                           : "Post & Lock"}
-                      </button>
+                      </button>}
                     </>
                   )}
                 </div>
