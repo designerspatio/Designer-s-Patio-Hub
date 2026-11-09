@@ -11,7 +11,7 @@ const itemIdFromScan=(raw:string):string|null=>{
  const input=raw.trim();const matched=input.match(/(?:^|\/i\/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[/?#]|$)/i);
  return matched?.[1]?.toLowerCase() || (/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(input)?input.toLowerCase():null);
 };
-const csv=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;
+const csv=(value:unknown)=>{let cell=String(value??"");if(typeof value==="string"&&/^[=+\\-@\\t\\r]/.test(cell.trimStart()))cell="\'"+cell;return `"${cell.replaceAll('"','""')}"`;};
 
 export default function InventoryCountPanel({supabase,items}:{supabase:SupabaseClient|null;items:Item[]}){
  const [counts,setCounts]=useState<Count[]>([]);
