@@ -973,8 +973,7 @@ const paymentMethods = [
   "Cash",
   "Wire",
   "Check",
-  "Visa",
-  "Mastercard",
+  "Visa/Mastercard",
   "Discover",
   "Amex",
 ] as const;
@@ -2550,7 +2549,7 @@ export default function Home() {
   const [paymentForm, setPaymentForm] = useState<PaymentForm>({
     payment_date: todayISO(),
     amount: "",
-    payment_method: "Visa",
+    payment_method: "Visa/Mastercard",
     reference: "",
     notes: "",
   });
@@ -10369,7 +10368,7 @@ export default function Home() {
         suggested > 0
           ? suggested.toFixed(2)
           : "",
-      payment_method: "Visa",
+      payment_method: "Visa/Mastercard",
       reference: "",
       notes: "",
     });
