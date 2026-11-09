@@ -2569,6 +2569,8 @@ export default function Home() {
     useState<DailyCashBatch[]>([]);
   const [dailyCashBatchSummaries, setDailyCashBatchSummaries] =
     useState<Record<string, { total: number; paymentCount: number }>>({});
+  const [dailyCashCorrectionHistory, setDailyCashCorrectionHistory] =
+    useState<Array<{id: string; correction_reason: string; corrected_at: string; corrected_by: string}>>([]);
   const [selectedDailyCashBatch, setSelectedDailyCashBatch] =
     useState<DailyCashBatch | null>(null);
   const [dailyCashBatchPayments, setDailyCashBatchPayments] =
@@ -11617,6 +11619,7 @@ export default function Home() {
     if (error) { window.alert("Could not save expected ship date: " + error.message); return; }
     setPurchaseOrderAcknowledgements(items => items.map(item => item.id === ack.id ? {...item, expected_ship_date: date || null} : item));
     setAcknowledgementLibrary(items => items.map(item => item.id === ack.id ? {...item, expected_ship_date: date || null} : item));
+    setSelectedAcknowledgement(current => current?.id === ack.id ? {...current, expected_ship_date: date || null} : current);
     await loadPurchaseOrders();
     setMessage("Expected ship date saved and linked to the sale.");
   }
@@ -18021,13 +18024,24 @@ export default function Home() {
     setMessage("Expense deleted.");
   }
 
+  async function loadDailyCashCorrectionHistory(batchId: string) {
+    if (!supabase || !canCorrectPostedCash) { setDailyCashCorrectionHistory([]); return; }
+    const {data, error} = await supabase.from("daily_cash_correction_history")
+      .select("id,correction_reason,corrected_at,corrected_by")
+      .eq("daily_cash_batch_id",batchId).order("corrected_at",{ascending:false});
+    if (error) { setMessage("Could not load correction history: " + error.message); return; }
+    setDailyCashCorrectionHistory(data || []);
+  }
+
   async function openDailyCashBatch(
     batch: DailyCashBatch
   ) {
     setDailyCashBatchPayments([]);
     setDailyCashTenderTotals([]);
     setDailyCashTenderDrafts({});
+    setDailyCashCorrectionHistory([]);
     setSelectedDailyCashBatch(batch);
+    if (batch.status === "Posted" && canCorrectPostedCash) void loadDailyCashCorrectionHistory(batch.id);
     setDailyCashDate(batch.business_date);
     setDailyCashNotes(batch.notes || "");
     setMessage("");
@@ -18363,6 +18377,22 @@ export default function Home() {
         };
       }
     );
+
+    if (correctingPosted) {
+      const { error: correctionError } = await supabase.rpc("dp_correct_posted_daily_cash", {
+        p_batch_id: selectedDailyCashBatch.id,
+        p_tenders: tenderPayloads.map(item => ({payment_method: item.payment_method, actual_amount: item.actual_amount, notes: item.notes})),
+        p_notes: dailyCashNotes,
+        p_reason: postedCorrectionReason,
+      });
+      if (correctionError) {
+        window.alert("Could not correct posted Daily Cash: " + correctionError.message);
+        return;
+      }
+      await Promise.all([loadDailyCashBatchDetails(selectedDailyCashBatch), loadDailyCashBatches(), loadDailyCashCorrectionHistory(selectedDailyCashBatch.id)]);
+      setMessage("Posted Daily Cash corrected. Before/after values and reason saved in history.");
+      return;
+    }
 
     const [tenderResult, batchResult] =
       await Promise.all([
@@ -29177,6 +29207,15 @@ export default function Home() {
                   )}
                 </div>
 
+                {canCorrectPostedCash && selectedDailyCashBatch.status === "Posted" && (
+                  <section className="daily-cash-notes">
+                    <strong>Posted correction history</strong>
+                    {dailyCashCorrectionHistory.length === 0 ? <p>No corrections recorded for this batch.</p> :
+                      dailyCashCorrectionHistory.map(entry => (
+                        <p key={entry.id}>{new Date(entry.corrected_at).toLocaleString()} • {entry.correction_reason}</p>
+                      ))}
+                  </section>
+                )}
                 <div className="modal-actions">
                   <button
                     className="modal-secondary"
@@ -32591,6 +32630,11 @@ export default function Home() {
                           </div>
 
                           <div className="ack-header-grid">
+                            <label>
+                              <span>EXPECTED SHIP DATE (VENDOR)</span>
+                              <input type="date" value={selectedAcknowledgement.expected_ship_date || ""}
+                                onChange={(event) => void saveAcknowledgementShipDate(selectedAcknowledgement, event.target.value)} />
+                            </label>
                             <label>
                               <span>EXPECTED VENDOR</span>
                               <input
