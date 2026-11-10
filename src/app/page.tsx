@@ -8,6 +8,8 @@ import { canMergeQuote, mergeQuoteHeaders, mergeQuoteLines } from "./quoteMerge"
 
 import { splitQuoteLines, splitQuoteCharges } from "./quoteSplit";
 
+import {canManageQuoteFinancials, productCommissionable} from "./quoteFinancialAccess";
+
 import ChangePassword from "./ChangePassword";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
@@ -2278,7 +2280,7 @@ function saleItemToDraft(
       item.acknowledged_unit_cost == null
         ? null
         : Number(item.acknowledged_unit_cost),
-    commissionable: item.commissionable !== false,
+    commissionable: productCommissionable(item),
     fulfillment_method: item.fulfillment_method,
     inventory_item_id: item.inventory_item_id || "",
   };
@@ -3255,7 +3257,7 @@ export default function Home() {
             : Number(item.expected_unit_cost),
         quantity: String(numberOrZero(item.quantity) || 1),
         sort_order: numberOrZero(item.sort_order),
-        commissionable: item.commissionable !== false,
+        commissionable: productCommissionable(item),
       });
     }
 
@@ -7003,7 +7005,7 @@ export default function Home() {
           item.expected_unit_cost == null
             ? null
             : Number(item.expected_unit_cost),
-        commissionable: item.commissionable !== false,
+        commissionable: productCommissionable(item),
       } as QuoteItem;
     });
 
@@ -7076,6 +7078,7 @@ export default function Home() {
     field: keyof QuoteItem,
     value: string | number | boolean | null
   ) {
+    if (field === "commissionable" && !canManageQuoteFinancials(profile)) return;
     setQuoteItems((current) =>
       current.map((existing) => {
         if (existing.local_id !== localId) return existing;
@@ -8836,7 +8839,7 @@ export default function Home() {
           item.surcharge_pct_snapshot
         ),
         expected_unit_cost: item.expected_unit_cost,
-        commissionable: item.commissionable,
+        commissionable: productCommissionable(item),
         updated_at: new Date().toISOString(),
       }));
 
@@ -9512,7 +9515,7 @@ export default function Home() {
         ),
         expected_unit_cost: calculatedItem.expected_unit_cost,
         acknowledged_unit_cost: null,
-        commissionable: calculatedItem.commissionable,
+        commissionable: productCommissionable(calculatedItem),
         fulfillment_method: calculatedItem.inventory_item_id ? "Inventory" : "Special Order",
         inventory_item_id: calculatedItem.inventory_item_id || null,
         updated_at: new Date().toISOString(),
@@ -9874,6 +9877,7 @@ export default function Home() {
     field: keyof SalesOrderItemDraft,
     value: string | number | boolean | null
   ) {
+    if (field === "commissionable" && !canManageQuoteFinancials(profile)) return;
     setSaleEditItems((current) =>
       current.map((existing) => {
         if (existing.local_id !== localId) return existing;
@@ -10260,7 +10264,7 @@ export default function Home() {
         ),
         expected_unit_cost: item.expected_unit_cost,
         acknowledged_unit_cost: item.acknowledged_unit_cost,
-        commissionable: item.commissionable,
+        commissionable: productCommissionable(item),
         fulfillment_method: item.fulfillment_method,
         inventory_item_id:
           item.fulfillment_method === "Inventory"
@@ -14421,7 +14425,7 @@ export default function Home() {
         const commissionable = items.reduce(
           (sum, item) =>
             sum +
-            (item.commissionable
+            (productCommissionable(item)
               ? numberOrZero(item.quantity) *
                 numberOrZero(item.unit_price)
               : 0),
@@ -18788,6 +18792,7 @@ export default function Home() {
     session.user.email ||
     "there";
 
+  const canEditQuoteFinancials = canManageQuoteFinancials(profile);
   const dashboardMode = dashboardModeForProfile(profile);
   const canManageStockOrders = ["Owner","Manager","Assistant Manager","Shipping / Accounting"].includes(profile?.role||"");
 
@@ -25889,7 +25894,7 @@ export default function Home() {
                               %
                             </strong>
                           </div>
-                          <label className="commission-toggle">
+                          {canEditQuoteFinancials && <label className="commission-toggle">
                             <input
                               type="checkbox"
                               checked={item.commissionable}
@@ -25902,10 +25907,10 @@ export default function Home() {
                               }
                             />
                             Commissionable
-                          </label>
+                          </label>}
                         </div>
 
-                        {manufacturer &&
+                        {canEditQuoteFinancials && manufacturer &&
                           manufacturer.purchasing_factor == null && (
                             <div className="line-warning">
                               {manufacturer.name} does not have a
@@ -25979,7 +25984,7 @@ export default function Home() {
                     </strong>
                   </div>
 
-                  <div className="internal-cost-summary">
+                  {canEditQuoteFinancials && <div className="internal-cost-summary">
                     <div>
                       <span>Expected merchandise cost</span>
                       <strong>
@@ -25993,7 +25998,7 @@ export default function Home() {
                         {quoteEditorTotals.marginPct.toFixed(1)}%
                       </strong>
                     </div>
-                  </div>
+                  </div>}
                 </section>
               </div>
             </div>
@@ -26735,15 +26740,15 @@ export default function Home() {
                             <span>Extended</span>
                             <strong>{money(extended)}</strong>
                           </div>
-                          <div>
+{canEditQuoteFinancials && <div>
                             <span>Expected Cost</span>
                             <strong>
                               {item.expected_unit_cost == null
                                 ? "Factor needed"
                                 : money(expectedExtended)}
                             </strong>
-                          </div>
-                          <label className="commission-toggle">
+                          </div>}
+                          {canEditQuoteFinancials && <label className="commission-toggle">
                             <input
                               type="checkbox"
                               checked={item.commissionable}
@@ -26756,7 +26761,7 @@ export default function Home() {
                               }
                             />
                             Commissionable
-                          </label>
+                          </label>}
                         </div>
                       </article>
                     );
@@ -27057,10 +27062,10 @@ export default function Home() {
                       <strong>{money(ext)}</strong>
                     </div>
 
-                    <div className="sale-item-money">
+{canEditQuoteFinancials && <div className="sale-item-money">
                       <span>COST</span>
                       <strong>{money(cost)}</strong>
-                    </div>
+                    </div>}
 
                     <select
                       className="fulfillment-select"
@@ -27167,6 +27172,7 @@ export default function Home() {
                     <span>Order Total</span>
                     <strong>{money(total)}</strong>
                   </div>
+{canEditQuoteFinancials && <>
                   <div>
                     <span>Expected Cost</span>
                     <strong>{money(totalCost)}</strong>
@@ -27175,6 +27181,7 @@ export default function Home() {
                     <span>Merch. Margin</span>
                     <strong>{margin.toFixed(1)}%</strong>
                   </div>
+</>}
                 </div>
               );
             })()}
