@@ -5,9 +5,12 @@ const vm = require('node:vm');
 const { stripTypeScriptTypes } = require('node:module');
 const source = fs.readFileSync('src/app/page.tsx', 'utf8');
 function harness(name, end, tables, overrides = {}) {
-  const alerts = [], writes = [];
+  const alerts = [], writes = [], rpcCalls = [];
   const ctx = {
-    supabase: { from(table) {
+    supabase: { rpc(name, args) {
+      rpcCalls.push({name,args});
+      return {single: async () => tables.rpcResult};
+    }, from(table) {
       const filters = []; let operation = 'select', payload;
       const q = {
         select() { return q; }, order() { return q; },
@@ -31,13 +34,16 @@ function harness(name, end, tables, overrides = {}) {
     paymentMethods:['Cash','Visa'],numberOrZero:v=>Number(v)||0,money:v=>`$${v}`,
     dailyCashTenderDrafts:{Cash:{actual_amount:'999'}},selectedDailyCashBatch:{id:'other'},
     setDailyCashSyncing(){},setDailyCashBatchPayments(){},setMessage(){},setPostingDailyCash(){},
+    setDailyCashTenderTotals(){},setDailyCashTenderDrafts(drafts){ctx.drafts=drafts;},
+    setSelectedDailyCashBatch(batch){ctx.postedBatch=batch;},
+    dailyCashBatchPayments:[],dailyCashNotes:'',selectedSale:null,
     loadDailyCashBatchDetails:async()=>{},loadDailyCashBatches:async()=>{},
     ...overrides
   };
   vm.createContext(ctx);
   const code = source.slice(source.indexOf(`  async function ${name}(`),source.indexOf(`  ${end}`,source.indexOf(`  async function ${name}(`)));
   vm.runInContext(stripTypeScriptTypes(code,{mode:'transform'}),ctx);
-  return {run:ctx[name],writes,alerts};
+  return {run:ctx[name],writes,alerts,rpcCalls,ctx};
 }
 const batch = {id:'b',status:'Open',business_date:'2026-11-04'};
 function fixtures(){return {payments:[
@@ -45,15 +51,13 @@ function fixtures(){return {payments:[
  {id:'draft',payment_date:'2026-11-04',posted:false,amount:50,payment_method:'Cash'},
  {id:'other',payment_date:'2026-11-06',posted:true,amount:500,payment_method:'Cash'},
  {id:'locked',payment_date:'2026-11-04',posted:true,amount:300,payment_method:'Cash'}
-],daily_cash_batch_payments:[{daily_cash_batch_id:'locked-batch',payment_id:'locked'}],daily_cash_tender_totals:[]};}
-test('backdated payments use payment date, exclude drafts and already batched payments; refresh is idempotent',async()=>{
+],daily_cash_batch_payments:[{daily_cash_batch_id:'locked-batch',payment_id:'locked','daily_cash_batches.status':'Posted'}],daily_cash_tender_totals:[]};}
+test('refresh previews both applied and legacy posted payments on their payment date',async()=>{
  const h=harness('syncDailyCashBatchPayments','function updateDailyCashTenderDraft',fixtures());
  const result=await h.run(batch,false,false);
- assert.deepEqual(Array.from(result,p=>p.id),['p']);
- const cash=h.writes.find(w=>w.operation==='upsert').payload.find(t=>t.payment_method==='Cash');
- assert.equal(cash.system_amount,100);assert.equal(cash.actual_amount,100);
- await h.run(batch,false,false);
- assert.equal(h.writes.filter(w=>w.operation==='insert').length,1);
+ assert.deepEqual(Array.from(result,p=>p.id),['p','draft']);
+ assert.equal(h.ctx.drafts.Cash.actual_amount,'150');
+ assert.equal(h.writes.length,0);
 });
 test('locked batch is immutable and query failures cannot return stale payment data',async()=>{
  const h=harness('syncDailyCashBatchPayments','function updateDailyCashTenderDraft',fixtures());
@@ -61,13 +65,25 @@ test('locked batch is immutable and query failures cannot return stale payment d
  const failed=harness('syncDailyCashBatchPayments','function updateDailyCashTenderDraft',{payments:new Error('offline')});
  assert.equal(await failed.run(batch),null);assert.match(failed.alerts[0],/offline/);
 });
-test('Daily Cash cannot lock while customer payments remain unposted',async()=>{
- const h=harness('postDailyCashBatch','function closeDailyCashBatch',fixtures(),{selectedDailyCashBatch:batch});
- await h.run();assert.equal(h.writes.length,0);assert.match(h.alerts[0],/still unposted/);
+test('Daily Cash posts applied payments and locks the batch through one RPC',async()=>{
+ const posted={...batch,status:'Posted'};
+ const h=harness('postDailyCashBatch','function closeDailyCashBatch',{rpcResult:{data:posted,error:null}},{
+   selectedDailyCashBatch:batch,dailyCashBatchPayments:fixtures().payments.slice(0,2),
+   dailyCashTenderDrafts:{Cash:{actual_amount:'145',notes:'Drawer count'}},
+ });
+ await h.run();
+ assert.equal(h.rpcCalls.length,1);
+ assert.equal(h.rpcCalls[0].name,'dp_post_daily_cash');
+ assert.equal(h.rpcCalls[0].args.p_batch_id,batch.id);
+ assert.equal(h.rpcCalls[0].args.p_tenders[0].actual_amount,145);
+ assert.equal(h.ctx.postedBatch,posted);
+ assert.equal(h.writes.length,0);
 });
-test('Daily Cash cannot lock an empty batch or after a failed refresh',async()=>{
- for(const value of [null,[]]) {
-  const h=harness('postDailyCashBatch','function closeDailyCashBatch',{payments:[]},{selectedDailyCashBatch:batch,syncDailyCashBatchPayments:async()=>value});
-  await h.run();assert.equal(h.writes.length,0);
- }
+test('Daily Cash displays posting failures without switching to a posted batch',async()=>{
+ const h=harness('postDailyCashBatch','function closeDailyCashBatch',{
+   rpcResult:{data:null,error:{message:'No customer payments are available'}},
+ },{selectedDailyCashBatch:batch});
+ await h.run();
+ assert.equal(h.ctx.postedBatch,undefined);
+ assert.match(h.alerts[0],/No customer payments/);
 });
