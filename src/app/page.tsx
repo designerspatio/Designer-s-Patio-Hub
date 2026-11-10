@@ -6,6 +6,8 @@ import { salesChargeLabel, serviceChargeRange, outOfStateServiceCharge, type Ser
 
 import { canMergeQuote, mergeQuoteHeaders, mergeQuoteLines } from "./quoteMerge";
 
+import { splitQuoteLines, splitQuoteCharges } from "./quoteSplit";
+
 import ChangePassword from "./ChangePassword";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
@@ -2877,6 +2879,11 @@ export default function Home() {
   const [quoteMergeIds, setQuoteMergeIds] = useState<string[]>([]);
   const [quoteMergeBusy, setQuoteMergeBusy] = useState(false);
   const [quoteMergeError, setQuoteMergeError] = useState("");
+  const [quoteSplitOpen, setQuoteSplitOpen] = useState(false);
+  const [quoteSplitIds, setQuoteSplitIds] = useState<string[]>([]);
+  const [quoteSplitBusy, setQuoteSplitBusy] = useState(false);
+  const [quoteSplitError, setQuoteSplitError] = useState("");
+  const [quoteSavedSnapshot, setQuoteSavedSnapshot] = useState("");
   const [quoteEditorOpen, setQuoteEditorOpen] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [quoteForm, setQuoteForm] = useState<QuoteForm>({
@@ -6922,8 +6929,10 @@ export default function Home() {
     setQuoteNewClientOpen(false);
     setQuoteNewClientError("");
 
+    setQuoteSplitOpen(false);
+    setQuoteSavedSnapshot("");
     setSelectedQuote(quote);
-    setQuoteForm({
+    const loadedForm: QuoteForm = {
       client_id: quote.client_id,
       salesperson_user_id: quote.salesperson_user_id || "",
       status: quote.status || "Draft",
@@ -6945,7 +6954,8 @@ export default function Home() {
       adjustment_amount: numberOrZero(
         quote.adjustment_amount
       ).toString(),
-    });
+    };
+    setQuoteForm(loadedForm);
 
     setQuoteEditorOpen(true);
     setMessage("");
@@ -6997,15 +7007,13 @@ export default function Home() {
       } as QuoteItem;
     });
 
-    setQuoteItems(
-      loadedItems.length > 0
-        ? loadedItems
-        : [blankQuoteItem(0)]
-    );
+    const editorItems = loadedItems.length ? loadedItems : [blankQuoteItem(0)];
+    setQuoteItems(editorItems);
+    setQuoteSavedSnapshot(JSON.stringify({form:loadedForm,items:editorItems}));
   }
 
   function closeQuoteEditor() {
-    if (savingQuote || quoteNewClientSaving) return;
+    if (savingQuote || quoteNewClientSaving || quoteSplitBusy) return;
     setQuoteNewClientOpen(false);
     setQuoteEditorOpen(false);
     setSelectedQuote(null);
@@ -8869,12 +8877,45 @@ export default function Home() {
     }
 
     await loadQuotes();
+    if (savedQuote) await openQuote(savedQuote);
     setSavingQuote(false);
     setMessage(
       `Quote #${savedQuote?.quote_number || ""} saved as ${
         savedQuote?.status || "Draft"
       }.`
     );
+  }
+
+  async function splitCurrentQuote() {
+    if (!supabase || !selectedQuote || quoteSplitBusy) return;
+    if (quoteSavedSnapshot !== JSON.stringify({form:quoteForm,items:rawQuoteItems})) {
+      setQuoteSplitError("Save your changes before splitting this quote."); return;
+    }
+    setQuoteSplitBusy(true); setQuoteSplitError("");
+    try {
+      const {data:fresh,error:readError} = await supabase.from("quote_items").select("*").eq("quote_id",selectedQuote.id).order("id");
+      if (readError) throw readError;
+      // Compare the saved product fields to reject changes made in another session.
+      const keys=quoteItemColumns.split(",").filter(k=>k!=="id" && k!=="quote_id");
+      const normalize=(item:Record<string,unknown>)=>JSON.stringify(keys.map(k=>item[k]==null?"":String(item[k])));
+      const products=rawQuoteItems.filter(l=>!isManufacturerCharge(l));
+      const freshProducts=(fresh||[]).filter(l=>!isManufacturerCharge(l));
+      if (products.length!==freshProducts.length || products.some(l=>!freshProducts.some(f=>f.id===l.id && normalize(f)===normalize(l as unknown as Record<string,unknown>)))) throw new Error("This quote changed in another session. Reopen it before splitting.");
+      const parts=splitQuoteLines(rawQuoteItems,quoteSplitIds,manufacturers);
+      const amount=(lines:QuoteItem[])=>lines.reduce((n,l)=>n+numberOrZero(l.quantity)*numberOrZero(l.unit_price),0);
+      const charges=splitQuoteCharges(quoteForm.notes,numberOrZero(quoteForm.adjustment_amount),numberOrZero(quoteForm.freight_amount),amount(parts.remaining),amount(parts.moved),selectedQuote.quote_number);
+      const payload=(part:typeof charges.remaining,lines:QuoteItem[])=>({...part,charges:lines.filter(isManufacturerCharge).map(l=>({...l,inventory_item_id:null}))});
+      const {data,error}=await supabase.rpc("dp_split_quote",{
+        p_quote_id:selectedQuote.id,p_item_ids:quoteSplitIds,p_updated_at:selectedQuote.updated_at,
+        p_expected_items:fresh,p_remaining:payload(charges.remaining,parts.remaining),p_moved:payload(charges.moved,parts.moved),
+      });
+      if(error) throw error;
+      const created=data as Quote;
+      await loadQuotes();
+      await openQuote(created);
+      setMessage(`Created quote #${created.quote_number} with the selected items. The original quote keeps the remaining items, freight and additional charges.`);
+    } catch(error) { setQuoteSplitError((error as {message?:string})?.message || "Could not split quote. No items were moved."); }
+    finally {setQuoteSplitBusy(false);}
   }
 
   async function deleteQuote() {
@@ -24909,11 +24950,13 @@ export default function Home() {
               <div className="quote-header-actions">
                 {selectedQuote && (
                   <>
+                    <button className="modal-secondary" disabled={savingQuote || convertingQuote || quoteSplitBusy || selectedQuote.approved || !canMergeQuote(selectedQuote)}
+                      onClick={()=>{setQuoteSplitOpen(!quoteSplitOpen);setQuoteSplitIds([]);setQuoteSplitError("");}}>Split Quote</button>
                     <button
                       className="convert-sale-button"
                       onClick={convertQuoteToSale}
                       disabled={
-                        savingQuote ||
+                        savingQuote || quoteSplitBusy ||
                         convertingQuote ||
                         selectedQuote.approved ||
                         Boolean(selectedQuote.converted_sales_order_id)
@@ -24929,14 +24972,14 @@ export default function Home() {
                     <button
                       className="modal-secondary"
                       onClick={downloadQuotePdf}
-                      disabled={savingQuote || convertingQuote}
+                      disabled={savingQuote || convertingQuote || quoteSplitBusy}
                     >
                       Download PDF
                     </button>
                     <button
                       className="archive-button"
                       onClick={toggleQuoteArchive}
-                      disabled={savingQuote}
+                      disabled={savingQuote || quoteSplitBusy}
                     >
                       {selectedQuote.status === "Archived"
                         ? "Unarchive"
@@ -24945,7 +24988,7 @@ export default function Home() {
                     <button
                       className="delete-button"
                       onClick={deleteQuote}
-                      disabled={savingQuote}
+                      disabled={savingQuote || quoteSplitBusy}
                     >
                       Delete
                     </button>
@@ -24961,7 +25004,20 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="quote-editor-body">
+            <div className="quote-editor-body" style={quoteSplitBusy?{pointerEvents:"none"}:undefined}>
+              {quoteSplitOpen && <section className="quote-card" aria-label="Split quote">
+                <h3>Move items to a separate quote</h3>
+                <p>Select whole item rows to move into a new draft for this client. Leave at least one item here. Freight, extra charges and manual tax stay on this quote; automatic tax and manufacturer charges recalculate on both.</p>
+                {quoteSavedSnapshot !== JSON.stringify({form:quoteForm,items:rawQuoteItems}) && <p role="alert">Save your changes before splitting.</p>}
+                {rawQuoteItems.filter(l=>!isManufacturerCharge(l)).map(l=><label key={l.local_id} style={{display:"flex",gap:10,marginBottom:12}}>
+                  <input type="checkbox" disabled={quoteSplitBusy || !l.id} checked={quoteSplitIds.includes(l.id||"")} onChange={e=>setQuoteSplitIds(ids=>e.target.checked?[...ids,l.id!]:ids.filter(id=>id!==l.id))}/>
+                  {l.quantity} × {l.description || l.sku || "Item"} — {money(numberOrZero(l.quantity)*l.unit_price)}
+                </label>)}
+                {quoteSplitError && <p role="alert" style={{color:"#b42318"}}>{quoteSplitError}</p>}
+                <button className="modal-primary" disabled={quoteSplitBusy || !quoteSplitIds.length || quoteSplitIds.length>=rawQuoteItems.filter(l=>!isManufacturerCharge(l)).length || quoteSavedSnapshot!==JSON.stringify({form:quoteForm,items:rawQuoteItems})} onClick={splitCurrentQuote}>{quoteSplitBusy?"Splitting…":"Move Selected Items to New Quote"}</button>
+                <button className="modal-secondary" disabled={quoteSplitBusy} onClick={()=>setQuoteSplitOpen(false)}>Cancel</button>
+              </section>}
+
               <section className="quote-card">
                 <div className="quote-card-title">
                   Quote Details
@@ -25946,7 +26002,7 @@ export default function Home() {
               <button
                 className="modal-secondary"
                 onClick={closeQuoteEditor}
-                disabled={savingQuote}
+                disabled={savingQuote || quoteSplitBusy}
               >
                 Close
               </button>
@@ -25954,7 +26010,7 @@ export default function Home() {
               <button
                 className="modal-primary quote-save-button"
                 onClick={saveQuote}
-                disabled={savingQuote}
+                disabled={savingQuote || quoteSplitBusy}
               >
                 {savingQuote
                   ? "Saving..."
