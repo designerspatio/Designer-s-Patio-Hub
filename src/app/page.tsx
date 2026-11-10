@@ -4,6 +4,8 @@ import {availableToSell,validateInventoryCounts,validateQuoteInventory,validateS
 
 import { salesChargeLabel, serviceChargeRange, outOfStateServiceCharge, type ServiceChargePeriod } from "./serviceCharges";
 
+import { canMergeQuote, mergeQuoteHeaders, mergeQuoteLines } from "./quoteMerge";
+
 import ChangePassword from "./ChangePassword";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
@@ -2870,6 +2872,11 @@ export default function Home() {
   });
 
 
+  const [quoteMergeOpen, setQuoteMergeOpen] = useState(false);
+  const [quoteMergeClient, setQuoteMergeClient] = useState("");
+  const [quoteMergeIds, setQuoteMergeIds] = useState<string[]>([]);
+  const [quoteMergeBusy, setQuoteMergeBusy] = useState(false);
+  const [quoteMergeError, setQuoteMergeError] = useState("");
   const [quoteEditorOpen, setQuoteEditorOpen] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [quoteForm, setQuoteForm] = useState<QuoteForm>({
@@ -6865,6 +6872,49 @@ export default function Home() {
     resetQuoteEditor();
     setQuoteEditorOpen(true);
     setMessage("");
+  }
+
+  async function prepareMergedQuote() {
+    if (!supabase || quoteMergeBusy) return;
+    setQuoteMergeBusy(true);
+    setQuoteMergeError("");
+    try {
+      const { data: headers, error: headerError } = await supabase.from("quotes")
+        .select(quoteColumns).in("id", quoteMergeIds);
+      if (headerError) throw headerError;
+      if (!headers || headers.length !== quoteMergeIds.length) throw new Error("Some selected quotes are no longer available. Refresh and try again.");
+      const sources = quoteMergeIds.map(id => headers.find(q => q.id === id) as Quote);
+      const merged = mergeQuoteHeaders(sources);
+      const primary = sources[0];
+      const { data: rows, error: itemsError } = await supabase.from("quote_items")
+        .select(quoteItemColumns).in("quote_id", quoteMergeIds).order("sort_order", {ascending:true});
+      if (itemsError) throw itemsError;
+      const lines = mergeQuoteLines(sources.flatMap(q => (rows || []).filter(row => row.quote_id === q.id)) as QuoteItem[], newLocalId)
+        .map(item => ({...item, manufacturer_id:item.manufacturer_id || "", quantity:String(item.quantity),
+          image_url:item.image_url || "", sku:item.sku || "", description:item.description || "",
+          finish:item.finish || "", fabric_name:item.fabric_name || "", grade:item.grade || "", additional_details:item.additional_details || ""}));
+      if (!lines.length) throw new Error("The selected quotes have no product items to merge.");
+      const stockError = validateQuoteInventory(lines.filter(l=>l.inventory_item_id).map(l=>({inventory_item_id:l.inventory_item_id!,quantity:numberOrZero(l.quantity)})),new Map(inventoryItems.map(stock=>[stock.id,stock])));
+      if (stockError) throw new Error(stockError);
+      resetQuoteEditor();
+      setQuoteForm({
+        client_id:primary.client_id, salesperson_user_id:primary.salesperson_user_id || profile?.id || "",
+        status:"Draft", quote_date:todayISO(), expiration_date:primary.expiration_date || "",
+        customer_po:primary.customer_po || "", ship_to_name:primary.ship_to_name || "",
+        ship_to_contact:primary.ship_to_contact || "", ship_to_phone:primary.ship_to_phone || "",
+        ship_to_address:primary.ship_to_address || "", ship_to_city:primary.ship_to_city || "",
+        ship_to_state:primary.ship_to_state || "", ship_to_zip:primary.ship_to_zip || "",
+        delivery_notes:sources.map(q=>q.delivery_notes ? `Quote #${q.quote_number}: ${q.delivery_notes}` : "").filter(Boolean).join("\n"),
+        ...merged,
+      });
+      setQuoteItems(lines);
+      setQuoteMergeOpen(false);
+      setQuoteMergeIds([]);
+      setQuoteEditorOpen(true);
+      setMessage(`Merged draft ready for review. Shipping, salesperson and project reference use quote #${primary.quote_number}. Freight and additional charges are combined; review them before saving. Original quotes are unchanged.`);
+    } catch (error) {
+      setQuoteMergeError(error instanceof Error ? error.message : (error as {message?:string})?.message || "Could not prepare merged quote.");
+    } finally { setQuoteMergeBusy(false); }
   }
 
   async function openQuote(quote: Quote) {
@@ -22409,6 +22459,9 @@ export default function Home() {
                   </p>
                 </div>
 
+                <button className="modal-secondary" onClick={() => {setQuoteMergeOpen(!quoteMergeOpen);setQuoteMergeIds([]);setQuoteMergeError("");}} disabled={quoteMergeBusy}>
+                  Merge Quotes
+                </button>
                 <button
                   className="new-client-button"
                   onClick={openNewQuote}
@@ -22416,6 +22469,31 @@ export default function Home() {
                   + New Quote
                 </button>
               </div>
+
+              {quoteMergeOpen && (
+                <section className="client-list-panel" style={{padding:20,marginBottom:20}} aria-label="Merge quotes">
+                  <h2>Merge quotes into a new draft</h2>
+                  <p>Choose a client, then select two or more open quotes. The first selected quote supplies shipping, salesperson, expiration and project reference. All items, freight and additional charges are combined. Original quotes stay unchanged.</p>
+                  <label>Client <select value={quoteMergeClient} disabled={quoteMergeBusy} onChange={e=>{setQuoteMergeClient(e.target.value);setQuoteMergeIds([]);setQuoteMergeError("");}}>
+                    <option value="">Choose client</option>
+                    {clients.filter(c=>scopedQuotes.some(q=>q.client_id===c.id && canMergeQuote(q))).map(c=><option key={c.id} value={c.id}>{getClientName(c)}</option>)}
+                  </select></label>
+                  <div style={{display:"grid",gap:12,margin:"16px 0",maxHeight:320,overflowY:"auto"}}>
+                    {scopedQuotes.filter(q=>q.client_id===quoteMergeClient && canMergeQuote(q)).map(q=>(
+                      <label key={q.id} style={{display:"flex",gap:10,alignItems:"center"}}>
+                        <input type="checkbox" checked={quoteMergeIds.includes(q.id)} disabled={quoteMergeBusy} onChange={e=>{setQuoteMergeIds(ids=>e.target.checked?[...ids,q.id]:ids.filter(id=>id!==q.id));setQuoteMergeError("");}} />
+                        Quote #{q.quote_number} · {q.quote_date} · {q.customer_po || "No project reference"} · {q.status}{quoteMergeIds[0]===q.id ? " · Primary" : ""}
+                      </label>
+                    ))}
+                  </div>
+                  {quoteMergeClient && scopedQuotes.filter(q=>q.client_id===quoteMergeClient && canMergeQuote(q)).length<2 && <p>This client needs at least two open quotes to merge.</p>}
+                  {quoteMergeError && <p role="alert" style={{color:"#b42318"}}>{quoteMergeError}</p>}
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                    <button className="modal-primary" disabled={quoteMergeBusy || quoteMergeIds.length<2} onClick={prepareMergedQuote}>{quoteMergeBusy?"Preparing…":`Review Merged Draft (${quoteMergeIds.length})`}</button>
+                    <button className="modal-secondary" disabled={quoteMergeBusy} onClick={()=>setQuoteMergeOpen(false)}>Cancel</button>
+                  </div>
+                </section>
+              )}
 
               <div className="quote-stat-grid">
                 <MiniStat
