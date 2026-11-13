@@ -23,6 +23,7 @@ import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
 import WarrantyDashboard from "./WarrantyDashboard";
 import { poShippingForm, poCostDrafts, poCostUpdates, effectivePoCost } from "./purchaseOrderDetails";
+import { isPoAcknowledged, matchesPoAcknowledgement, savePoRpc, withPoDeadline, manualAcknowledgementPayload, type PoAcknowledgementFilter } from "./poAcknowledgements";
 import { mayManageClaims } from "./claims";
 import {defaultQuoteSalesperson,salespersonOptionName} from "./quoteSalesperson";
 import StockPurchaseOrders from "./StockPurchaseOrders";
@@ -576,6 +577,9 @@ type AcknowledgementLineDraft = {
 };
 
 type AcknowledgementReviewDraft = {
+  acknowledgement_number: string;
+  acknowledgement_date: string;
+  expected_ship_date: string;
   vendor_name: string;
   po_number: string;
   freight_amount: string;
@@ -586,6 +590,9 @@ const acknowledgementIssueColumns =
   "id,acknowledgement_id,purchase_order_item_id,issue_type,severity,expected_value,acknowledged_value,message,resolved,resolution_notes,resolved_by,resolved_at,created_at";
 
 const blankAcknowledgementReviewDraft: AcknowledgementReviewDraft = {
+  acknowledgement_number: "",
+  acknowledgement_date: "",
+  expected_ship_date: "",
   vendor_name: "",
   po_number: "",
   freight_amount: "",
@@ -2487,6 +2494,15 @@ export default function Home() {
     useState(false);
   const [purchaseOrderForm, setPurchaseOrderForm] =
     useState<PurchaseOrderForm | null>(null);
+  const [poAcknowledgementFilter, setPoAcknowledgementFilter] = useState<PoAcknowledgementFilter>("all");
+  const [purchaseOrderSaveError, setPurchaseOrderSaveError] = useState("");
+  const [purchaseOrderSaveNotice, setPurchaseOrderSaveNotice] = useState("");
+  const [savingAcknowledgementReview, setSavingAcknowledgementReview] = useState(false);
+  const [acknowledgementSaveError, setAcknowledgementSaveError] = useState("");
+  const [acknowledgementSaveNotice, setAcknowledgementSaveNotice] = useState("");
+  const [acknowledgementReviewPoVersion, setAcknowledgementReviewPoVersion] = useState("");
+  const [acknowledgementReviewBaseline, setAcknowledgementReviewBaseline] = useState("");
+  const acknowledgementReviewRequest = useRef(0);
   const [purchaseOrderSearch, setPurchaseOrderSearch] =
     useState("");
   const [purchaseOrdersLoading, setPurchaseOrdersLoading] =
@@ -4696,9 +4712,11 @@ export default function Home() {
   const filteredPurchaseOrders = useMemo(() => {
     const term = purchaseOrderSearch.trim().toLowerCase();
 
-    if (!term) return scopedPurchaseOrders;
+    const uploaded=acknowledgementLibrary.map(a=>a.purchase_order_id);
+    const filtered=scopedPurchaseOrders.filter(order=>matchesPoAcknowledgement(order,poAcknowledgementFilter,uploaded));
+    if (!term) return filtered;
 
-    return scopedPurchaseOrders.filter((order) => {
+    return filtered.filter((order) => {
       const maker = manufacturers.find(
         (manufacturer) => manufacturer.id === order.manufacturer_id
       );
@@ -4722,6 +4740,8 @@ export default function Home() {
     });
   }, [
     scopedPurchaseOrders,
+    poAcknowledgementFilter,
+    acknowledgementLibrary,
     purchaseOrderSearch,
     manufacturers,
     salesOrders,
@@ -5311,6 +5331,7 @@ export default function Home() {
     setAcknowledgementIssueLibrary([]);
     setAcknowledgementSearch("");
     setSelectedAcknowledgement(null);
+    acknowledgementReviewRequest.current+=1;
     setAcknowledgementReviewOpen(false);
     setAcknowledgementReviewDraft(
       blankAcknowledgementReviewDraft
@@ -10780,164 +10801,67 @@ export default function Home() {
     return issues;
   }
 
-  async function openAcknowledgementReview(
-    acknowledgement: PurchaseOrderAcknowledgement
-  ) {
+  async function openAcknowledgementReview(acknowledgement: PurchaseOrderAcknowledgement) {
     if (!supabase) return;
+    const requestId=++acknowledgementReviewRequest.current;
+    setSelectedAcknowledgement(acknowledgement);setAcknowledgementReviewOpen(true);
+    setAcknowledgementReviewLoading(true);setAcknowledgementReviewIssues([]);
+    setAcknowledgementSaveError("");setAcknowledgementSaveNotice("");setAcknowledgementReviewBaseline("");setAcknowledgementReviewPoVersion("");setAcknowledgementReviewPoItems([]);
+    try {
+      const [itemResult,orderResult,ackResult]=await withPoDeadline(signal=>Promise.all([
+        supabase.from("purchase_order_items").select(purchaseOrderItemColumns).eq("purchase_order_id",acknowledgement.purchase_order_id).order("sort_order").abortSignal(signal),
+        supabase.from("purchase_orders").select(purchaseOrderColumns).eq("id",acknowledgement.purchase_order_id).abortSignal(signal).single(),
+        supabase.from("purchase_order_acknowledgements").select(purchaseOrderAcknowledgementColumns).eq("id",acknowledgement.id).abortSignal(signal).single(),
+      ]));
+      if(requestId!==acknowledgementReviewRequest.current)return;
+      if(itemResult.error||orderResult.error||ackResult.error)throw new Error(itemResult.error?.message||orderResult.error?.message||ackResult.error?.message||"Unable to load acknowledgement.");
+      const ack=ackResult.data as PurchaseOrderAcknowledgement,order=orderResult.data as PurchaseOrder,items=(itemResult.data||[]) as PurchaseOrderItem[];
+      const details=(ack.comparison_details&&typeof ack.comparison_details==='object'&&!Array.isArray(ack.comparison_details)?ack.comparison_details:{}) as Record<string,unknown>;
+      const stored=Array.isArray(details.lines)?details.lines as Record<string,unknown>[]:[];
+      const lines:AcknowledgementLineDraft[]=items.map(item=>{const line=stored.find(l=>String(l.purchase_order_item_id||'')===item.id);return {purchase_order_item_id:item.id,sku:String(line?.sku??item.sku??''),quantity:line?.quantity!=null?String(line.quantity):'',unit_cost:line?.unit_cost!=null?String(line.unit_cost):item.acknowledged_unit_cost!=null?String(item.acknowledged_unit_cost):'',extra:false};});
+      for(const line of stored.filter(l=>l.extra||!l.purchase_order_item_id))lines.push({purchase_order_item_id:null,sku:String(line.sku??''),quantity:line.quantity!=null?String(line.quantity):'',unit_cost:line.unit_cost!=null?String(line.unit_cost):'',extra:true});
+      const draft:AcknowledgementReviewDraft={acknowledgement_number:order.acknowledgement_number||'',acknowledgement_date:order.acknowledgement_date||todayISO(),expected_ship_date:ack.expected_ship_date||order.estimated_ship_date||'',vendor_name:String(details.vendor_name??ack.vendor_name_detected??manufacturerName(order.manufacturer_id)),po_number:String(details.po_number??ack.po_number_detected??order.po_number),freight_amount:details.freight_amount!=null?String(details.freight_amount):'',lines};
+      setSelectedAcknowledgement(ack);setPurchaseOrders(current=>current.map(o=>o.id===order.id?order:o));
+      setAcknowledgementReviewPoItems(items);setAcknowledgementReviewPoVersion(order.updated_at);
+      setAcknowledgementReviewDraft(draft);setAcknowledgementReviewBaseline(JSON.stringify(draft));
+      setAcknowledgementReviewIssues([]);setIssueResolutionDrafts({});
+      // Comparison flags are optional and cannot hold up opening or saving.
+      void withPoDeadline(signal=>supabase.from("purchase_order_acknowledgement_issues").select(acknowledgementIssueColumns).eq("acknowledgement_id",ack.id).order("created_at").abortSignal(signal)).then(result=>{
+        if(requestId!==acknowledgementReviewRequest.current||result.error)return;
+        setAcknowledgementReviewIssues((result.data||[]) as PurchaseOrderAcknowledgementIssue[]);
+        setIssueResolutionDrafts(Object.fromEntries((result.data||[]).map(i=>[i.id,i.resolution_notes||''])));
+      }).catch(()=>{});
+    }catch(error){if(requestId===acknowledgementReviewRequest.current)setAcknowledgementSaveError((error as Error).message);}
+    finally{if(requestId===acknowledgementReviewRequest.current)setAcknowledgementReviewLoading(false);}
+  }
 
-    setSelectedAcknowledgement(acknowledgement);
-    setAcknowledgementReviewOpen(true);
-    setAcknowledgementReviewLoading(true);
-    setAcknowledgementReviewIssues([]);
-    setIssueResolutionDrafts({});
-    setMessage("");
-
-    const order =
-      purchaseOrders.find(
-        (entry) =>
-          entry.id === acknowledgement.purchase_order_id
-      ) || null;
-
-    if (!order) {
-      setAcknowledgementReviewLoading(false);
-      window.alert(
-        "The purchase order for this acknowledgement could not be found."
-      );
-      return;
-    }
-
-    const [itemResult, issueResult] = await Promise.all([
-      supabase
-        .from("purchase_order_items")
-        .select(purchaseOrderItemColumns)
-        .eq("purchase_order_id", order.id)
-        .order("sort_order", { ascending: true }),
-      supabase
-        .from("purchase_order_acknowledgement_issues")
-        .select(acknowledgementIssueColumns)
-        .eq("acknowledgement_id", acknowledgement.id)
-        .order("resolved", { ascending: true })
-        .order("created_at", { ascending: true }),
-    ]);
-
-    if (itemResult.error) {
-      setAcknowledgementReviewLoading(false);
-      window.alert(
-        `Could not load PO items: ${itemResult.error.message}`
-      );
-      return;
-    }
-
-    if (issueResult.error) {
-      setAcknowledgementReviewLoading(false);
-      window.alert(
-        `Could not load acknowledgement issues: ${issueResult.error.message}`
-      );
-      return;
-    }
-
-    const poItems =
-      (itemResult.data || []) as PurchaseOrderItem[];
-    const issues =
-      (issueResult.data ||
-        []) as PurchaseOrderAcknowledgementIssue[];
-
-    const details =
-      acknowledgement.comparison_details &&
-      typeof acknowledgement.comparison_details === "object" &&
-      !Array.isArray(acknowledgement.comparison_details)
-        ? (acknowledgement.comparison_details as Record<
-            string,
-            unknown
-          >)
-        : {};
-
-    const storedLines = Array.isArray(details.lines)
-      ? (details.lines as Array<Record<string, unknown>>)
-      : [];
-
-    const expectedLines: AcknowledgementLineDraft[] =
-      poItems.map((item) => {
-        const stored = storedLines.find(
-          (entry) =>
-            String(
-              entry.purchase_order_item_id || ""
-            ) === item.id
-        );
-
-        return {
-          purchase_order_item_id: item.id,
-          sku:
-            stored?.sku != null
-              ? String(stored.sku)
-              : "",
-          quantity:
-            stored?.quantity != null
-              ? String(stored.quantity)
-              : "",
-          unit_cost:
-            stored?.unit_cost != null
-              ? String(stored.unit_cost)
-              : "",
-          extra: false,
-        };
-      });
-
-    const extraLines: AcknowledgementLineDraft[] =
-      storedLines
-        .filter(
-          (entry) =>
-            Boolean(entry.extra) ||
-            !entry.purchase_order_item_id
-        )
-        .map((entry) => ({
-          purchase_order_item_id: null,
-          sku:
-            entry.sku != null
-              ? String(entry.sku)
-              : "",
-          quantity:
-            entry.quantity != null
-              ? String(entry.quantity)
-              : "",
-          unit_cost:
-            entry.unit_cost != null
-              ? String(entry.unit_cost)
-              : "",
-          extra: true,
-        }));
-
-    const storedFreight =
-      details.freight_amount != null
-        ? String(details.freight_amount)
-        : "";
-
-    setAcknowledgementReviewPoItems(poItems);
-    setAcknowledgementReviewDraft({
-      vendor_name:
-        details.vendor_name != null
-          ? String(details.vendor_name)
-          : acknowledgement.vendor_name_detected || "",
-      po_number:
-        details.po_number != null
-          ? String(details.po_number)
-          : acknowledgement.po_number_detected || "",
-      freight_amount: storedFreight,
-      lines: [...expectedLines, ...extraLines],
-    });
-    setAcknowledgementReviewIssues(issues);
-    setIssueResolutionDrafts(
-      Object.fromEntries(
-        issues.map((issue) => [
-          issue.id,
-          issue.resolution_notes || "",
-        ])
-      )
-    );
-    setAcknowledgementReviewLoading(false);
+  async function saveAcknowledgementReview() {
+    if(!supabase||!selectedAcknowledgement||savingAcknowledgementReview||acknowledgementReviewLoading||!acknowledgementReviewPoVersion)return;
+    setSavingAcknowledgementReview(true);setAcknowledgementSaveError("");setAcknowledgementSaveNotice("");
+    try {
+      const payload=manualAcknowledgementPayload(acknowledgementReviewDraft,acknowledgementReviewPoItems);
+      const saved=await savePoRpc<{acknowledgement:PurchaseOrderAcknowledgement;purchase_order:PurchaseOrder;items:PurchaseOrderItem[]}>(supabase,"dp_save_acknowledgement_review",{p_ack_id:selectedAcknowledgement.id,p_expected_ack_updated_at:selectedAcknowledgement.updated_at,p_expected_po_updated_at:acknowledgementReviewPoVersion,p_review:payload});
+      const ack=saved.acknowledgement,order=saved.purchase_order;
+      if(!ack?.id||!order?.id||!Array.isArray(saved.items))throw new Error("Save confirmation was incomplete. Reopen the acknowledgement to check its saved values.");
+      acknowledgementReviewRequest.current+=1;
+      setSelectedAcknowledgement(ack);setAcknowledgementReviewPoVersion(order.updated_at);
+      setAcknowledgementReviewPoItems(saved.items);setAcknowledgementReviewIssues([]);setIssueResolutionDrafts({});
+      setAcknowledgementLibrary(current=>current.map(a=>a.id===ack.id?ack:a));
+      setAcknowledgementIssueLibrary(current=>current.filter(i=>i.acknowledgement_id!==ack.id));
+      setPurchaseOrders(current=>current.map(o=>o.id===order.id?order:o));
+      setPurchaseOrderItemsSummary(current=>({...current,[order.id]:saved.items}));
+      const savedDraft={...acknowledgementReviewDraft,acknowledgement_date:order.acknowledgement_date||"",expected_ship_date:ack.expected_ship_date||""};
+      setAcknowledgementReviewDraft(savedDraft);setAcknowledgementReviewBaseline(JSON.stringify(savedDraft));
+      setSalesItemsSummary(current=>Object.fromEntries(Object.entries(current).map(([saleId,lines])=>[saleId,lines.map(line=>{const changed=saved.items.find(i=>i.sales_order_item_id===line.id);return changed?{...line,acknowledged_unit_cost:changed.acknowledged_unit_cost}:line;})])));
+      setAcknowledgementSaveNotice(`Acknowledgement and PO #${order.po_number} saved successfully. AI comparison is optional.`);
+    }catch(error){setAcknowledgementSaveError((error as Error).message);}
+    finally{setSavingAcknowledgementReview(false);}
   }
 
   function closeAcknowledgementReview() {
+    if(savingAcknowledgementReview)return;
+    if(acknowledgementReviewBaseline&&JSON.stringify(acknowledgementReviewDraft)!==acknowledgementReviewBaseline&&!window.confirm("Discard unsaved acknowledgement changes?"))return;
+    acknowledgementReviewRequest.current+=1;
     setAcknowledgementReviewOpen(false);
     setSelectedAcknowledgement(null);
     setAcknowledgementReviewDraft(
@@ -10952,7 +10876,7 @@ export default function Home() {
   }
 
   function updateAcknowledgementReviewHeader(
-    field: "vendor_name" | "po_number" | "freight_amount",
+    field: "vendor_name" | "po_number" | "freight_amount" | "acknowledgement_number" | "acknowledgement_date" | "expected_ship_date",
     value: string
   ) {
     setAcknowledgementReviewDraft((current) => ({
@@ -11009,16 +10933,17 @@ export default function Home() {
       return;
     }
 
-    setRunningAcknowledgementExtraction(
-      true
-    );
+    if(savingAcknowledgementReview||runningAcknowledgementComparison)return;
+    if(acknowledgementReviewBaseline&&JSON.stringify(acknowledgementReviewDraft)!==acknowledgementReviewBaseline&&!window.confirm("AI capture will replace unsaved review values. Continue?"))return;
+    setRunningAcknowledgementExtraction(true);
     setMessage("");
 
     try {
-      const response = await fetch(
+      const response = await withPoDeadline(signal=>fetch(
         "/api/acknowledgements/extract",
         {
           method: "POST",
+          signal,
           headers: {
             "Content-Type":
               "application/json",
@@ -11030,7 +10955,7 @@ export default function Home() {
               selectedAcknowledgement.id,
           }),
         }
-      );
+      ));
 
       const payload = await response
         .json()
@@ -11075,12 +11000,8 @@ export default function Home() {
         updated
       );
 
-      await Promise.all([
-        openAcknowledgementReview(
-          updated
-        ),
-        loadAcknowledgementLibrary(),
-      ]);
+      setAcknowledgementLibrary(current=>current.map(a=>a.id===updated.id?updated:a));
+      await openAcknowledgementReview(updated);
 
       const confidence =
         Number(
@@ -11132,6 +11053,9 @@ export default function Home() {
     setRunningAcknowledgementComparison(true);
     setMessage("");
 
+    try {
+    await withPoDeadline(async signal=>{
+    let savedIssues:PurchaseOrderAcknowledgementIssue[]=[];
     const issues: Array<{
       acknowledgement_id: string;
       purchase_order_item_id: string | null;
@@ -11258,7 +11182,6 @@ export default function Home() {
       );
     }
 
-    const costUpdates: Array<PromiseLike<unknown>> = [];
 
     acknowledgementReviewPoItems.forEach((poItem) => {
       const line = acknowledgementReviewDraft.lines.find(
@@ -11370,17 +11293,7 @@ export default function Home() {
           );
         }
 
-        costUpdates.push(
-          supabase
-            .from("purchase_order_items")
-            .update({
-              acknowledged_unit_cost:
-                acknowledgedUnitCost,
-              updated_at:
-                new Date().toISOString(),
-            })
-            .eq("id", poItem.id)
-        );
+
       }
     });
 
@@ -11425,7 +11338,7 @@ export default function Home() {
       .eq(
         "acknowledgement_id",
         selectedAcknowledgement.id
-      );
+      ).abortSignal(signal);
 
     if (deleteResult.error) {
       setRunningAcknowledgementComparison(false);
@@ -11436,12 +11349,12 @@ export default function Home() {
     }
 
     if (issues.length > 0) {
-      const { error: issueInsertError } =
+      const { data: savedIssueData, error: issueInsertError } =
         await supabase
           .from(
             "purchase_order_acknowledgement_issues"
           )
-          .insert(issues);
+          .insert(issues).select(acknowledgementIssueColumns).abortSignal(signal);
 
       if (issueInsertError) {
         setRunningAcknowledgementComparison(false);
@@ -11450,10 +11363,7 @@ export default function Home() {
         );
         return;
       }
-    }
-
-    if (costUpdates.length > 0) {
-      await Promise.all(costUpdates);
+      savedIssues=(savedIssueData||[]) as PurchaseOrderAcknowledgementIssue[];
     }
 
     const comparisonStatus =
@@ -11517,7 +11427,7 @@ export default function Home() {
         })
         .eq("id", selectedAcknowledgement.id)
         .select(purchaseOrderAcknowledgementColumns)
-        .single();
+        .abortSignal(signal).single();
 
     if (updateError || !updatedAck) {
       setRunningAcknowledgementComparison(false);
@@ -11536,14 +11446,8 @@ export default function Home() {
       nextAcknowledgement
     );
 
-    await Promise.all([
-      loadAcknowledgementReviewIssues(
-        nextAcknowledgement.id
-      ),
-      loadAcknowledgementLibrary(),
-      loadPurchaseOrders(),
-    ]);
-
+    setAcknowledgementLibrary(current=>current.map(a=>a.id===nextAcknowledgement.id?nextAcknowledgement:a));
+    setAcknowledgementReviewIssues(savedIssues);setIssueResolutionDrafts(Object.fromEntries(savedIssues.map(i=>[i.id,i.resolution_notes||""])));
     setRunningAcknowledgementComparison(false);
     setMessage(
       issues.length === 0
@@ -11552,6 +11456,9 @@ export default function Home() {
             issues.length === 1 ? "" : "s"
           }.`
     );
+    });
+    }catch(error){setAcknowledgementSaveError(`Comparison could not finish: ${(error as Error).message}. You can still use Save Acknowledgement.`);}
+    finally{setRunningAcknowledgementComparison(false);}
   }
 
   async function toggleAcknowledgementIssueResolved(
@@ -11634,6 +11541,7 @@ export default function Home() {
   async function openPurchaseOrder(order: PurchaseOrder) {
     if (!supabase) return;
 
+    setPurchaseOrderSaveError("");setPurchaseOrderSaveNotice("");
     setSelectedPurchaseOrder(order);
     setPurchaseOrderForm(purchaseOrderToForm(order));
     setPurchaseOrderModalOpen(true);
@@ -11684,7 +11592,7 @@ export default function Home() {
        JSON.stringify(purchaseOrderCostDrafts)!==JSON.stringify(poCostDrafts(purchaseOrderItems))));
   }
   function closePurchaseOrderModal() {
-    if (savingPurchaseOrder || receivingPoItemId) return;
+    if (savingPurchaseOrder || uploadingAcknowledgement || receivingPoItemId) return;
     if (purchaseOrderHasEdits() && !window.confirm("Discard unsaved PO address or pricing changes?")) return;
     setPurchaseOrderModalOpen(false);
     setSelectedPurchaseOrder(null);
@@ -11728,141 +11636,26 @@ export default function Home() {
     );
   }
 
-  async function saveAcknowledgementShipDate(ack: PurchaseOrderAcknowledgement, date: string) {
-    if (!supabase) return;
-    const {error} = await supabase.from("purchase_order_acknowledgements")
-      .update({expected_ship_date: date || null, updated_at: new Date().toISOString()}).eq("id", ack.id);
-    if (error) { window.alert("Could not save expected ship date: " + error.message); return; }
-    setPurchaseOrderAcknowledgements(items => items.map(item => item.id === ack.id ? {...item, expected_ship_date: date || null} : item));
-    setAcknowledgementLibrary(items => items.map(item => item.id === ack.id ? {...item, expected_ship_date: date || null} : item));
-    setSelectedAcknowledgement(current => current?.id === ack.id ? {...current, expected_ship_date: date || null} : current);
-    await loadPurchaseOrders();
-    setMessage("Expected ship date saved and linked to the sale.");
-  }
-  async function uploadPurchaseOrderAcknowledgement(
-    file: File
-  ) {
-    if (
-      !supabase ||
-      !selectedPurchaseOrder ||
-      !purchaseOrderForm
-    ) {
-      return;
-    }
-
-    const isPdf =
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf");
-
-    if (!isPdf) {
-      window.alert(
-        "Please choose a PDF acknowledgement file."
-      );
-      return;
-    }
-
-    const maxBytes = 25 * 1024 * 1024;
-    if (file.size > maxBytes) {
-      window.alert(
-        "That PDF is larger than 25 MB. Please use a smaller file."
-      );
-      return;
-    }
-
-    setUploadingAcknowledgement(true);
-    setMessage("");
-
-    const safeName = file.name
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-");
-
-    const storagePath =
-      `${selectedPurchaseOrder.id}/` +
-      `${Date.now()}-${safeName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("po-acknowledgements")
-      .upload(storagePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: "application/pdf",
-      });
-
-    if (uploadError) {
-      setUploadingAcknowledgement(false);
-      window.alert(
-        `Could not upload acknowledgement: ${uploadError.message}`
-      );
-      return;
-    }
-
-    const { error: recordError } = await supabase
-      .from("purchase_order_acknowledgements")
-      .insert({
-        purchase_order_id: selectedPurchaseOrder.id,
-        file_name: file.name,
-        file_path: storagePath,
-        comparison_status: "Pending",
-        created_by: profile?.id || null,
-        updated_at: new Date().toISOString(),
-      });
-
-    if (recordError) {
-      await supabase.storage
-        .from("po-acknowledgements")
-        .remove([storagePath]);
-
-      setUploadingAcknowledgement(false);
-      window.alert(
-        `The PDF uploaded, but its PO record could not be saved: ${recordError.message}`
-      );
-      return;
-    }
-
-    // Receiving the vendor acknowledgement is enough to move a
-    // Draft/Submitted PO into Acknowledged. Keep any later status intact.
-    const shouldAdvanceStatus =
-      selectedPurchaseOrder.status === "Draft" ||
-      selectedPurchaseOrder.status === "Submitted";
-
-    if (shouldAdvanceStatus) {
-      const nextAcknowledgementDate =
-        purchaseOrderForm.acknowledgement_date ||
-        todayISO();
-
-      const { data: updatedOrder, error: orderUpdateError } =
-        await supabase
-          .from("purchase_orders")
-          .update({
-            status: "Acknowledged",
-            acknowledgement_date: nextAcknowledgementDate,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", selectedPurchaseOrder.id)
-          .select(purchaseOrderColumns)
-          .single();
-
-      if (!orderUpdateError && updatedOrder) {
-        const nextOrder = updatedOrder as PurchaseOrder;
-        setSelectedPurchaseOrder(nextOrder);
-        setPurchaseOrderForm(
-          purchaseOrderToForm(nextOrder)
-        );
-      }
-    }
-
-    await Promise.all([
-      loadPurchaseOrderAcknowledgements(
-        selectedPurchaseOrder.id
-      ),
-      loadPurchaseOrders(),
-      loadAcknowledgementLibrary(),
-    ]);
-
-    setUploadingAcknowledgement(false);
-    setMessage(
-      `Acknowledgement uploaded to PO #${selectedPurchaseOrder.po_number}.`
-    );
+  async function uploadPurchaseOrderAcknowledgement(file:File) {
+    if(!supabase||!selectedPurchaseOrder||!purchaseOrderForm||uploadingAcknowledgement||savingPurchaseOrder)return;
+    if(purchaseOrderHasEdits()){setPurchaseOrderSaveError("Save your PO changes before uploading an acknowledgement.");return;}
+    if(file.type!=="application/pdf"&&!file.name.toLowerCase().endsWith(".pdf")){setPurchaseOrderSaveError("Choose a PDF acknowledgement.");return;}
+    if(file.size>25*1024*1024){setPurchaseOrderSaveError("This PDF is larger than 25 MB. Choose a smaller file.");return;}
+    setUploadingAcknowledgement(true);setPurchaseOrderSaveError("");setPurchaseOrderSaveNotice("");
+    const path=`${selectedPurchaseOrder.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g,"-")}`;
+    try {
+      const uploaded=await withPoDeadline(()=>supabase.storage.from("po-acknowledgements").upload(path,file,{cacheControl:"3600",upsert:false,contentType:"application/pdf"}),45000);
+      if(uploaded.error)throw new Error(`Could not upload acknowledgement: ${uploaded.error.message}`);
+      const result=await savePoRpc<{acknowledgement:PurchaseOrderAcknowledgement;purchase_order:PurchaseOrder}>(supabase,"dp_register_po_acknowledgement",{p_po_id:selectedPurchaseOrder.id,p_path:path,p_file_name:file.name});
+      if(!result.acknowledgement?.id||!result.purchase_order?.id)throw new Error("Upload registration could not be confirmed. Reopen the PO before retrying.");
+      const order=result.purchase_order,ack=result.acknowledgement;
+      setSelectedPurchaseOrder(order);setPurchaseOrderForm(purchaseOrderToForm(order));
+      setPurchaseOrders(current=>current.map(o=>o.id===order.id?order:o));
+      setPurchaseOrderAcknowledgements(current=>[ack,...current.filter(a=>a.id!==ack.id)]);
+      setAcknowledgementLibrary(current=>[ack,...current.filter(a=>a.id!==ack.id)]);
+      setPurchaseOrderSaveNotice(`Acknowledgement uploaded and PO #${order.po_number} marked acknowledged.`);
+    }catch(error){setPurchaseOrderSaveError((error as Error).message);}
+    finally{setUploadingAcknowledgement(false);}
   }
 
   async function viewPurchaseOrderAcknowledgement(
@@ -11966,24 +11759,32 @@ export default function Home() {
 
   async function savePurchaseOrder() {
     if (!supabase || !selectedPurchaseOrder || !purchaseOrderForm || savingPurchaseOrder) return;
+    setPurchaseOrderSaveError("");setPurchaseOrderSaveNotice("");
     let costItems;
     try { costItems=poCostUpdates(purchaseOrderItems,purchaseOrderCostDrafts); }
-    catch(error){setMessage((error as Error).message);return;}
+    catch(error){setPurchaseOrderSaveError((error as Error).message);return;}
     const freight=Number(purchaseOrderForm.freight_amount);
-    if(!Number.isFinite(freight)||freight<0||freight>100000000){setMessage("Enter valid, non-negative vendor freight.");return;}
-    setSavingPurchaseOrder(true);setMessage("");
+    if(!Number.isFinite(freight)||freight<0||freight>100000000){setPurchaseOrderSaveError("Enter valid, non-negative vendor freight.");return;}
+    setSavingPurchaseOrder(true);
     try {
-      const {data,error}=await supabase.rpc("dp_save_purchase_order_details",{
+      const hasAck=Boolean(purchaseOrderForm.acknowledgement_number.trim()||purchaseOrderForm.acknowledgement_date||purchaseOrderForm.status==="Acknowledged");
+      const updated=await savePoRpc<PurchaseOrder>(supabase,"dp_save_purchase_order_details",{
         p_id:selectedPurchaseOrder.id,p_expected_updated_at:selectedPurchaseOrder.updated_at,
-        p_header:{...purchaseOrderForm,freight_amount:freight,order_date:purchaseOrderForm.order_date||todayISO()},
+        p_header:{...purchaseOrderForm,freight_amount:freight,order_date:purchaseOrderForm.order_date||todayISO(),
+          status:hasAck&&["Draft","Submitted"].includes(purchaseOrderForm.status)?"Acknowledged":purchaseOrderForm.status,
+          acknowledgement_date:hasAck?(purchaseOrderForm.acknowledgement_date||todayISO()):""},
         p_items:costItems,
       });
-      if(error||!data){setMessage(`Could not save purchase order: ${error?.message||"Unknown error"}`);return;}
-      const updated=data as PurchaseOrder;
-      await openPurchaseOrder(updated);
-      await Promise.all([loadPurchaseOrders(),loadSalesOrders()]);
-      setMessage(`PO #${updated.po_number} saved, including ship-to details and confirmed pricing.`);
-    }catch(error){setMessage(`Could not save purchase order: ${(error as Error).message}`);}
+      if(!updated.id||!updated.updated_at)throw new Error("Save confirmation was incomplete. Reopen the PO to check its saved values.");
+      const items=purchaseOrderItems.map(item=>({...item,acknowledged_unit_cost:costItems.find(c=>c.id===item.id)!.acknowledged_unit_cost}));
+      setSelectedPurchaseOrder(updated);setPurchaseOrderForm(purchaseOrderToForm(updated));
+      setPurchaseOrderItems(items);setPurchaseOrderCostDrafts(poCostDrafts(items));
+      setPurchaseOrders(current=>current.map(o=>o.id===updated.id?updated:o));
+      setPurchaseOrderItemsSummary(current=>({...current,[updated.id]:items}));
+      setSalesItemsSummary(current=>Object.fromEntries(Object.entries(current).map(([saleId,lines])=>[saleId,lines.map(line=>{const changed=items.find(i=>i.sales_order_item_id===line.id);return changed?{...line,acknowledged_unit_cost:changed.acknowledged_unit_cost}:line;})])));
+      setPurchaseOrderSaveNotice(`PO #${updated.po_number} saved successfully.`);
+      // Confirmation depends only on the atomic save, never on AI or list reloads.
+    }catch(error){setPurchaseOrderSaveError((error as Error).message);}
     finally{setSavingPurchaseOrder(false);}
   }
 
@@ -18838,7 +18639,7 @@ export default function Home() {
     acknowledgedIds={acknowledgementLibrary.map(a=>a.purchase_order_id)}
     loadingPurchases={purchaseOrdersLoading || acknowledgementLoading}
     onPurchaseOrder={id=>{const order=purchaseOrders.find(o=>o.id===id);if(order)void openPurchaseOrder(order);}}
-    onAcknowledgements={()=>setView("acknowledgements")}
+    onAcknowledgements={()=>{setPoAcknowledgementFilter("unacknowledged");setView("purchase_orders");setRecordScope("all");setScopeSalespersonId("");}}
     onRefresh={async()=>{await Promise.all([loadPurchaseOrders(),loadAcknowledgementLibrary(),loadInventoryItems()]);}}
   /> : null;
 
@@ -19045,19 +18846,6 @@ export default function Home() {
                 <span>▣</span>
                 Stock Purchase Orders
               </button>}
-
-              <button
-                className={`nav-button ${
-                  view === "acknowledgements" ? "active" : ""
-                }`}
-                onClick={() => {
-                  setView("acknowledgements");
-                  setMessage("");
-                }}
-              >
-                <span>▥</span>
-                Acknowledgements
-              </button>
 
               <button
                 className={`nav-button ${
@@ -23122,6 +22910,14 @@ export default function Home() {
                 />
               </div>
 
+              <div className="client-result-bar" style={{gap:12,flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:8}}>Acknowledgement
+                  <select aria-label="Filter purchase orders by acknowledgement" value={poAcknowledgementFilter} onChange={e=>setPoAcknowledgementFilter(e.target.value as PoAcknowledgementFilter)}>
+                    <option value="all">All purchase orders</option><option value="acknowledged">Acknowledged</option><option value="unacknowledged">Unacknowledged</option>
+                  </select>
+                </label>
+                <span>{acknowledgementLoading?"Loading acknowledgement status…":`${scopedPurchaseOrders.filter(o=>isPoAcknowledged(o,acknowledgementLibrary.map(a=>a.purchase_order_id))).length} acknowledged · ${scopedPurchaseOrders.filter(o=>!isPoAcknowledged(o,acknowledgementLibrary.map(a=>a.purchase_order_id))).length} unacknowledged`}</span>
+              </div>
               <div className="search-card">
                 <div className="search-icon">⌕</div>
                 <input
@@ -27688,6 +27484,8 @@ export default function Home() {
                 </button>
               </div>
 
+              {purchaseOrderSaveError&&<p role="alert" style={{background:"#fff0f0",color:"#9d2e2e",padding:12,borderRadius:8}}>{purchaseOrderSaveError}</p>}
+              {purchaseOrderSaveNotice&&<p role="status" style={{background:"#eef8f0",color:"#28623d",padding:12,borderRadius:8}}>{purchaseOrderSaveNotice}</p>}
               <div className="po-snapshot-strip">
                 <div>
                   <span>FACTOR SNAPSHOT</span>
@@ -27733,6 +27531,7 @@ export default function Home() {
               <div className="form-grid po-form-grid">
                 <FormField label="Status">
                   <select
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     value={purchaseOrderForm.status}
                     onChange={(e) =>
                       updatePurchaseOrderForm(
@@ -27751,6 +27550,7 @@ export default function Home() {
 
                 <FormField label="Order Date">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     type="date"
                     value={purchaseOrderForm.order_date}
                     onChange={(e) =>
@@ -27764,6 +27564,7 @@ export default function Home() {
 
                 <FormField label="Acknowledgement #">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     value={
                       purchaseOrderForm.acknowledgement_number
                     }
@@ -27779,6 +27580,7 @@ export default function Home() {
 
                 <FormField label="Acknowledgement Date">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     type="date"
                     value={
                       purchaseOrderForm.acknowledgement_date
@@ -27794,6 +27596,7 @@ export default function Home() {
 
                 <FormField label="Estimated Ship Date">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     type="date"
                     value={
                       purchaseOrderForm.estimated_ship_date
@@ -27809,6 +27612,7 @@ export default function Home() {
 
                 <FormField label="Actual Ship Date">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     type="date"
                     value={purchaseOrderForm.actual_ship_date}
                     onChange={(e) =>
@@ -27822,6 +27626,7 @@ export default function Home() {
 
                 <FormField label="Carrier">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     value={purchaseOrderForm.carrier}
                     onChange={(e) =>
                       updatePurchaseOrderForm(
@@ -27835,6 +27640,7 @@ export default function Home() {
 
                 <FormField label="Tracking / PRO #">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     value={purchaseOrderForm.tracking_number}
                     onChange={(e) =>
                       updatePurchaseOrderForm(
@@ -27848,6 +27654,7 @@ export default function Home() {
 
                 <FormField label="Vendor Freight">
                   <input
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     inputMode="decimal"
                     value={purchaseOrderForm.freight_amount}
                     onChange={(e) =>
@@ -27861,16 +27668,17 @@ export default function Home() {
                 </FormField>
 
                 <div className="form-field wide"><strong>Ship to</strong><small>Copied from the original sales order. Changes here apply to this PO.</small></div>
-                <FormField label="Ship To Name"><input value={purchaseOrderForm.ship_to_name} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_name",e.target.value)} /></FormField>
-                <FormField label="Ship To Contact"><input value={purchaseOrderForm.ship_to_contact} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_contact",e.target.value)} /></FormField>
-                <FormField label="Ship To Phone"><input value={purchaseOrderForm.ship_to_phone} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_phone",e.target.value)} /></FormField>
-                <FormField label="Ship To Address" wide><textarea rows={2} value={purchaseOrderForm.ship_to_address} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_address",e.target.value)} /></FormField>
-                <FormField label="Ship To City"><input value={purchaseOrderForm.ship_to_city} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_city",e.target.value)} /></FormField>
-                <FormField label="Ship To State"><input value={purchaseOrderForm.ship_to_state} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_state",e.target.value)} /></FormField>
-                <FormField label="Ship To ZIP"><input value={purchaseOrderForm.ship_to_zip} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_zip",e.target.value)} /></FormField>
-                <FormField label="Delivery Instructions" wide><textarea rows={2} value={purchaseOrderForm.delivery_notes} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("delivery_notes",e.target.value)} /></FormField>
+                <FormField label="Ship To Name"><input value={purchaseOrderForm.ship_to_name} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_name",e.target.value)} /></FormField>
+                <FormField label="Ship To Contact"><input value={purchaseOrderForm.ship_to_contact} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_contact",e.target.value)} /></FormField>
+                <FormField label="Ship To Phone"><input value={purchaseOrderForm.ship_to_phone} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_phone",e.target.value)} /></FormField>
+                <FormField label="Ship To Address" wide><textarea rows={2} value={purchaseOrderForm.ship_to_address} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_address",e.target.value)} /></FormField>
+                <FormField label="Ship To City"><input value={purchaseOrderForm.ship_to_city} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_city",e.target.value)} /></FormField>
+                <FormField label="Ship To State"><input value={purchaseOrderForm.ship_to_state} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_state",e.target.value)} /></FormField>
+                <FormField label="Ship To ZIP"><input value={purchaseOrderForm.ship_to_zip} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("ship_to_zip",e.target.value)} /></FormField>
+                <FormField label="Delivery Instructions" wide><textarea rows={2} value={purchaseOrderForm.delivery_notes} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("delivery_notes",e.target.value)} /></FormField>
                 <FormField label="PO Notes" wide>
                   <textarea
+                    disabled={savingPurchaseOrder||uploadingAcknowledgement}
                     rows={3}
                     value={purchaseOrderForm.notes}
                     onChange={(e) =>
@@ -27953,7 +27761,7 @@ export default function Home() {
                           <strong data-po-effective-cost>{money(activeUnitCost)}</strong>
                           <input type="number" min="0" max="100000000" step="0.01" inputMode="decimal"
                             aria-label={`Confirmed unit cost for ${item.sku||item.description||"PO item"}`}
-                            placeholder={String(item.unit_cost)} disabled={savingPurchaseOrder}
+                            placeholder={String(item.unit_cost)} disabled={savingPurchaseOrder||uploadingAcknowledgement}
                             value={purchaseOrderCostDrafts[item.id]??""}
                             onChange={e=>setPurchaseOrderCostDrafts(current=>({...current,[item.id]:e.target.value}))}
                             style={{width:"100%",maxWidth:140,textAlign:"right"}} />
@@ -28077,8 +27885,8 @@ export default function Home() {
 
                           <label style={{display:"grid",gap:4,minWidth:180}}>
                             <span>Expected ship date</span>
-                            <input type="date" value={acknowledgement.expected_ship_date || ""}
-                              onChange={(event) => void saveAcknowledgementShipDate(acknowledgement, event.target.value)} />
+                            <strong>{acknowledgement.expected_ship_date||"Not entered"}</strong>
+                            <small>Use Review to edit and save</small>
                           </label>
                           <div className="po-ack-actions">
                             <button
@@ -28094,6 +27902,7 @@ export default function Home() {
                             <button
                               type="button"
                               onClick={() => {
+                                if(purchaseOrderHasEdits()){setPurchaseOrderSaveError("Save your PO changes before reviewing an acknowledgement.");return;}
                                 closePurchaseOrderModal();
                                 openAcknowledgementReview(
                                   acknowledgement
@@ -28128,11 +27937,9 @@ export default function Home() {
                 )}
 
                 <div className="po-ack-next">
-                  <strong>Comparison review is available.</strong>
+                  <strong>Save acknowledgements directly from this PO.</strong>
                   <span>
-                    Use Review to capture the vendor acknowledgement
-                    values, compare SKU, quantity, cost, freight,
-                    vendor and PO details, and resolve any flags.
+                    Use Review to enter vendor details, confirmed costs and ship dates, then Save Acknowledgement. AI extraction and comparison are optional.
                   </span>
                 </div>
               </div>
@@ -28141,14 +27948,14 @@ export default function Home() {
                 <button
                   className="modal-secondary"
                   onClick={closePurchaseOrderModal}
-                  disabled={savingPurchaseOrder}
+                  disabled={savingPurchaseOrder||uploadingAcknowledgement}
                 >
                   Close
                 </button>
                 <button
                   className="modal-primary"
                   onClick={savePurchaseOrder}
-                  disabled={savingPurchaseOrder}
+                  disabled={savingPurchaseOrder||uploadingAcknowledgement}
                 >
                   {savingPurchaseOrder
                     ? "Saving..."
@@ -32489,6 +32296,9 @@ export default function Home() {
                 </button>
               </div>
 
+              {acknowledgementSaveError&&<p role="alert" style={{background:"#fff0f0",color:"#9d2e2e",padding:12,borderRadius:8}}>{acknowledgementSaveError}</p>}
+              {acknowledgementSaveNotice&&<p role="status" style={{background:"#eef8f0",color:"#28623d",padding:12,borderRadius:8}}>{acknowledgementSaveNotice}</p>}
+              <div className="modal-actions"><button className="modal-primary" disabled={savingAcknowledgementReview||acknowledgementReviewLoading||runningAcknowledgementExtraction||runningAcknowledgementComparison||!acknowledgementReviewPoVersion} onClick={()=>void saveAcknowledgementReview()}>{savingAcknowledgementReview?"Saving…":"Save Acknowledgement"}</button></div>
               {acknowledgementReviewLoading ? (
                 <div className="empty-state">
                   Loading acknowledgement review...
@@ -32570,8 +32380,8 @@ export default function Home() {
                               type="button"
                               className="ack-ai-extract-button"
                               disabled={
-                                runningAcknowledgementExtraction ||
-                                runningAcknowledgementComparison
+                                savingAcknowledgementReview || runningAcknowledgementExtraction ||
+                                savingAcknowledgementReview || runningAcknowledgementExtraction || runningAcknowledgementComparison
                               }
                               onClick={
                                 extractAcknowledgementWithAI
@@ -32665,9 +32475,10 @@ export default function Home() {
                           <div className="ack-header-grid">
                             <label>
                               <span>EXPECTED SHIP DATE (VENDOR)</span>
-                              <input type="date" value={selectedAcknowledgement.expected_ship_date || ""}
-                                onChange={(event) => void saveAcknowledgementShipDate(selectedAcknowledgement, event.target.value)} />
+                              <input type="date" disabled={savingAcknowledgementReview} value={acknowledgementReviewDraft.expected_ship_date} onChange={event=>updateAcknowledgementReviewHeader("expected_ship_date",event.target.value)} />
                             </label>
+                            <label><span>ACKNOWLEDGEMENT NUMBER</span><input disabled={savingAcknowledgementReview} value={acknowledgementReviewDraft.acknowledgement_number} onChange={e=>updateAcknowledgementReviewHeader("acknowledgement_number",e.target.value)}/></label>
+                            <label><span>ACKNOWLEDGEMENT DATE</span><input type="date" disabled={savingAcknowledgementReview} value={acknowledgementReviewDraft.acknowledgement_date} onChange={e=>updateAcknowledgementReviewHeader("acknowledgement_date",e.target.value)}/></label>
                             <label>
                               <span>EXPECTED VENDOR</span>
                               <input
@@ -32678,7 +32489,7 @@ export default function Home() {
 
                             <label>
                               <span>ACKNOWLEDGED VENDOR</span>
-                              <input
+                              <input disabled={savingAcknowledgementReview}
                                 value={
                                   acknowledgementReviewDraft.vendor_name
                                 }
@@ -32706,7 +32517,7 @@ export default function Home() {
 
                             <label>
                               <span>ACKNOWLEDGED PO #</span>
-                              <input
+                              <input disabled={savingAcknowledgementReview}
                                 value={
                                   acknowledgementReviewDraft.po_number
                                 }
@@ -32734,7 +32545,7 @@ export default function Home() {
 
                             <label>
                               <span>ACKNOWLEDGED FREIGHT</span>
-                              <input
+                              <input disabled={savingAcknowledgementReview}
                                 inputMode="decimal"
                                 value={
                                   acknowledgementReviewDraft.freight_amount
@@ -32827,7 +32638,7 @@ export default function Home() {
                                       )}
                                     </div>
 
-                                    <input
+                                    <input disabled={savingAcknowledgementReview}
                                       value={line.sku}
                                       onChange={(event) =>
                                         updateAcknowledgementReviewLine(
@@ -32847,7 +32658,7 @@ export default function Home() {
                                         : poItem?.quantity ?? "—"}
                                     </div>
 
-                                    <input
+                                    <input disabled={savingAcknowledgementReview}
                                       inputMode="numeric"
                                       value={line.quantity}
                                       onChange={(event) =>
@@ -32877,7 +32688,7 @@ export default function Home() {
                                           )}
                                     </div>
 
-                                    <input
+                                    <input disabled={savingAcknowledgementReview}
                                       inputMode="decimal"
                                       value={line.unit_cost}
                                       onChange={(event) =>
@@ -32921,7 +32732,7 @@ export default function Home() {
 
                           <div className="ack-run-row">
                             <span>
-                              Review the AI-captured values first.
+                              AI comparison is optional. Save Acknowledgement stores the values above independently.
                               Running comparison replaces the current
                               issue set with the values shown above.
                             </span>
@@ -32929,7 +32740,7 @@ export default function Home() {
                               type="button"
                               className="modal-primary"
                               disabled={
-                                runningAcknowledgementComparison
+                                savingAcknowledgementReview || runningAcknowledgementExtraction || runningAcknowledgementComparison
                               }
                               onClick={
                                 runAcknowledgementComparison
@@ -33011,7 +32822,7 @@ export default function Home() {
                                       )}
 
                                       {!issue.resolved ? (
-                                        <input
+                                        <input disabled={savingAcknowledgementReview}
                                           value={
                                             issueResolutionDrafts[
                                               issue.id
