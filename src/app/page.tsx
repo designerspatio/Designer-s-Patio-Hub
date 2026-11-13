@@ -23,6 +23,7 @@ import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
 import WarrantyDashboard from "./WarrantyDashboard";
 import { poShippingForm, poCostDrafts, poCostUpdates, effectivePoCost } from "./purchaseOrderDetails";
+import { partitionPurchaseOrders, purchaseOrderInHistory, type PurchaseOrderSection } from "./purchaseOrderHistory";
 import { isPoAcknowledged, matchesPoAcknowledgement, savePoRpc, withPoDeadline, manualAcknowledgementPayload, type PoAcknowledgementFilter } from "./poAcknowledgements";
 import { mayManageClaims } from "./claims";
 import {defaultQuoteSalesperson,salespersonOptionName} from "./quoteSalesperson";
@@ -958,6 +959,7 @@ const poStatuses = [
   "In Production",
   "Ready to Ship",
   "Shipped",
+  "Partially Received",
   "Received",
   "Closed",
 ] as const;
@@ -2494,6 +2496,7 @@ export default function Home() {
     useState(false);
   const [purchaseOrderForm, setPurchaseOrderForm] =
     useState<PurchaseOrderForm | null>(null);
+  const [purchaseOrderSection, setPurchaseOrderSection] = useState<PurchaseOrderSection>("active");
   const [poAcknowledgementFilter, setPoAcknowledgementFilter] = useState<PoAcknowledgementFilter>("all");
   const [purchaseOrderSaveError, setPurchaseOrderSaveError] = useState("");
   const [purchaseOrderSaveNotice, setPurchaseOrderSaveNotice] = useState("");
@@ -4450,12 +4453,8 @@ export default function Home() {
   const scopedSalesOrders = useMemo(() => salesOrders.filter((order) =>
     matchesRecordScope(order.salesperson_user_id, recordScope, session?.user?.id, scopeSalespersonId)
   ), [salesOrders, recordScope, session?.user?.id, scopeSalespersonId]);
-  const scopedPurchaseOrders = useMemo(() => {
-    const owners = new Map(salesOrders.map((order) => [order.id, order.salesperson_user_id]));
-    return purchaseOrders.filter((order) => matchesRecordScope(
-      owners.get(order.sales_order_id), recordScope, session?.user?.id, scopeSalespersonId
-    ));
-  }, [purchaseOrders, salesOrders, recordScope, session?.user?.id, scopeSalespersonId]);
+  const purchaseOrderSections = useMemo(()=>partitionPurchaseOrders(purchaseOrders,purchaseOrderItemsSummary),[purchaseOrders,purchaseOrderItemsSummary]);
+  const sectionPurchaseOrders = purchaseOrderSections[purchaseOrderSection];
 
   const filteredClients = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -4713,7 +4712,7 @@ export default function Home() {
     const term = purchaseOrderSearch.trim().toLowerCase();
 
     const uploaded=acknowledgementLibrary.map(a=>a.purchase_order_id);
-    const filtered=scopedPurchaseOrders.filter(order=>matchesPoAcknowledgement(order,poAcknowledgementFilter,uploaded));
+    const filtered=sectionPurchaseOrders.filter(order=>matchesPoAcknowledgement(order,poAcknowledgementFilter,uploaded));
     if (!term) return filtered;
 
     return filtered.filter((order) => {
@@ -4739,7 +4738,7 @@ export default function Home() {
         .includes(term);
     });
   }, [
-    scopedPurchaseOrders,
+    sectionPurchaseOrders,
     poAcknowledgementFilter,
     acknowledgementLibrary,
     purchaseOrderSearch,
@@ -4748,17 +4747,17 @@ export default function Home() {
   ]);
 
   const purchaseOrderStats = useMemo(() => {
-    const open = scopedPurchaseOrders.filter(
-      (order) => order.status !== "Closed"
+    const open = sectionPurchaseOrders.filter(
+      (order) => !purchaseOrderInHistory(order,purchaseOrderItemsSummary[order.id])
     ).length;
 
-    const inProcess = scopedPurchaseOrders.filter(
+    const inProcess = sectionPurchaseOrders.filter(
       (order) =>
         order.status !== "Draft" &&
-        order.status !== "Closed"
+        !purchaseOrderInHistory(order,purchaseOrderItemsSummary[order.id])
     ).length;
 
-    const expectedCost = scopedPurchaseOrders.reduce((sum, order) => {
+    const expectedCost = sectionPurchaseOrders.reduce((sum, order) => {
       const items = purchaseOrderItemsSummary[order.id] || [];
       const merchandise = items.reduce(
         (itemSum, item) =>
@@ -4774,12 +4773,14 @@ export default function Home() {
     }, 0);
 
     return {
-      total: scopedPurchaseOrders.length,
+      total: sectionPurchaseOrders.length,
+      received:sectionPurchaseOrders.filter(order=>order.status!=="Closed"&&purchaseOrderInHistory(order,purchaseOrderItemsSummary[order.id])).length,
+      closed:sectionPurchaseOrders.filter(order=>order.status==="Closed").length,
       open,
       inProcess,
       expectedCost,
     };
-  }, [scopedPurchaseOrders, purchaseOrderItemsSummary]);
+  }, [sectionPurchaseOrders, purchaseOrderItemsSummary]);
 
   const visibleCatalogs = useMemo(() => catalogs.filter(catalog =>
     showArchivedCatalogs ? catalog.active === false : catalog.active !== false
@@ -11542,6 +11543,7 @@ export default function Home() {
     if (!supabase) return;
 
     setPurchaseOrderSaveError("");setPurchaseOrderSaveNotice("");
+    setPurchaseOrderSection(purchaseOrderInHistory(order,purchaseOrderItemsSummary[order.id])?"history":"active");
     setSelectedPurchaseOrder(order);
     setPurchaseOrderForm(purchaseOrderToForm(order));
     setPurchaseOrderModalOpen(true);
@@ -11734,27 +11736,29 @@ export default function Home() {
     setMessage("Acknowledgement deleted.");
   }
 
-  async function receivePurchaseOrderLine(item: PurchaseOrderItem) {
-    if (!supabase || !selectedPurchaseOrder || receivingPoItemId || savingPurchaseOrder) return;
-    if (purchaseOrderHasEdits()) {setMessage("Save your PO address and pricing changes before receiving items.");return;}
-    const outstanding = Math.max(0,numberOrZero(item.quantity)-numberOrZero(item.received_quantity));
-    if (!outstanding) return;
-    const raw = window.prompt(`Receive quantity for ${item.sku || item.description || "PO item"} (up to ${outstanding})`,String(outstanding));
-    if (raw === null) return;
-    const qty = Number(raw);
-    if (!Number.isSafeInteger(qty) || qty<1 || qty>outstanding) {
-      setMessage(`Enter a whole number between 1 and ${outstanding}.`);return;
-    }
-    setReceivingPoItemId(item.id);
-    const {error} = await supabase.rpc("dp_receive_po_line",
-      {p_purchase_order_item_id:item.id,p_quantity:qty});
-    if (error) {setMessage("Could not receive PO item: "+error.message);setReceivingPoItemId("");return;}
-    const {data} = await supabase.from("purchase_orders").select(purchaseOrderColumns)
-      .eq("id",selectedPurchaseOrder.id).single();
-    await Promise.all([loadPurchaseOrders(),loadSalesOrders()]);
-    if (data) await openPurchaseOrder(data as PurchaseOrder);
-    setReceivingPoItemId("");
-    setMessage(`Received ${qty} unit(s) on PO #${selectedPurchaseOrder.po_number}.`);
+  async function receivePurchaseOrderLine(item:PurchaseOrderItem) {
+    if(!supabase||!selectedPurchaseOrder||receivingPoItemId||savingPurchaseOrder)return;
+    if(purchaseOrderHasEdits()){setPurchaseOrderSaveError("Save your PO address and pricing changes before receiving items.");return;}
+    const outstanding=Math.max(0,numberOrZero(item.quantity)-numberOrZero(item.received_quantity));
+    if(!outstanding)return;
+    const raw=window.prompt(`Receive quantity for ${item.sku||item.description||"PO item"} (up to ${outstanding})`,String(outstanding));
+    if(raw===null)return;
+    const quantity=Number(raw);
+    if(!Number.isSafeInteger(quantity)||quantity<1||quantity>outstanding){setPurchaseOrderSaveError(`Enter a whole number between 1 and ${outstanding}.`);return;}
+    setReceivingPoItemId(item.id);setPurchaseOrderSaveError("");setPurchaseOrderSaveNotice("");
+    try {
+      const saved=await savePoRpc<{purchase_order:PurchaseOrder;items:PurchaseOrderItem[]}>(supabase,"dp_receive_po_line",{p_purchase_order_item_id:item.id,p_quantity:quantity});
+      if(!saved.purchase_order?.id||!Array.isArray(saved.items))throw new Error("Receiving could not be confirmed. Reopen the PO to check received quantities before retrying.");
+      const order=saved.purchase_order,items=saved.items;
+      setSelectedPurchaseOrder(order);setPurchaseOrderForm(purchaseOrderToForm(order));
+      setPurchaseOrderItems(items);setPurchaseOrderCostDrafts(poCostDrafts(items));
+      setPurchaseOrders(current=>current.map(o=>o.id===order.id?order:o));
+      setPurchaseOrderItemsSummary(current=>({...current,[order.id]:items}));
+      const complete=purchaseOrderInHistory(order,items);
+      if(complete)setPurchaseOrderSection("history");
+      setPurchaseOrderSaveNotice(complete?`PO #${order.po_number} fully received and moved to Purchase Order History.`:`Received ${quantity} unit(s) on PO #${order.po_number}. The remaining items are still active.`);
+    }catch(error){setPurchaseOrderSaveError((error as Error).message);}
+    finally{setReceivingPoItemId("");}
   }
 
   async function savePurchaseOrder() {
@@ -11776,7 +11780,7 @@ export default function Home() {
         p_items:costItems,
       });
       if(!updated.id||!updated.updated_at)throw new Error("Save confirmation was incomplete. Reopen the PO to check its saved values.");
-      const items=purchaseOrderItems.map(item=>({...item,acknowledged_unit_cost:costItems.find(c=>c.id===item.id)!.acknowledged_unit_cost}));
+      const items=purchaseOrderItems.map(item=>({...item,received_quantity:updated.status==="Received"?item.quantity:item.received_quantity,acknowledged_unit_cost:costItems.find(c=>c.id===item.id)!.acknowledged_unit_cost}));
       setSelectedPurchaseOrder(updated);setPurchaseOrderForm(purchaseOrderToForm(updated));
       setPurchaseOrderItems(items);setPurchaseOrderCostDrafts(poCostDrafts(items));
       setPurchaseOrders(current=>current.map(o=>o.id===updated.id?updated:o));
@@ -18639,7 +18643,7 @@ export default function Home() {
     acknowledgedIds={acknowledgementLibrary.map(a=>a.purchase_order_id)}
     loadingPurchases={purchaseOrdersLoading || acknowledgementLoading}
     onPurchaseOrder={id=>{const order=purchaseOrders.find(o=>o.id===id);if(order)void openPurchaseOrder(order);}}
-    onAcknowledgements={()=>{setPoAcknowledgementFilter("unacknowledged");setView("purchase_orders");setRecordScope("all");setScopeSalespersonId("");}}
+    onAcknowledgements={()=>{setPurchaseOrderSection("active");setPoAcknowledgementFilter("unacknowledged");setView("purchase_orders");setRecordScope("all");setScopeSalespersonId("");}}
     onRefresh={async()=>{await Promise.all([loadPurchaseOrders(),loadAcknowledgementLibrary(),loadInventoryItems()]);}}
   /> : null;
 
@@ -18960,7 +18964,7 @@ export default function Home() {
             </div>
           </header>
 
-          {(view === "dashboard" ? dashboardMode === "sales" : ["clients", "quotes", "sales", "purchase_orders"].includes(view)) && (
+          {(view === "dashboard" ? dashboardMode === "sales" : ["clients", "quotes", "sales"].includes(view)) && (
             <section className="record-scope-bar" aria-label="Record access">
               <div>
                 <strong>{recordScope === "mine" ? "My Records" : "All Access"}</strong>
@@ -22891,21 +22895,26 @@ export default function Home() {
                 </div>
               </div>
 
+              <div className="record-scope-toggle" role="group" aria-label="Purchase order sections" style={{margin:"16px 0",display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button type="button" aria-pressed={purchaseOrderSection==="active"} onClick={()=>{setPurchaseOrderSection("active");setPurchaseOrderSearch("");setPoAcknowledgementFilter("all");}}>Active Purchase Orders ({purchaseOrderSections.active.length})</button>
+                <button type="button" aria-pressed={purchaseOrderSection==="history"} onClick={()=>{setPurchaseOrderSection("history");setPurchaseOrderSearch("");setPoAcknowledgementFilter("all");}}>Purchase Order History ({purchaseOrderSections.history.length})</button>
+              </div>
+              <p style={{color:"#526579",fontSize:12}}>{purchaseOrderSection==="history"?"Received and closed purchase orders for the entire team. Open an order to view its address, costs, acknowledgements and receiving details.":"All team purchase orders. Fully received orders move automatically to Purchase Order History; partially received orders stay here."}</p>
               <div className="quote-stat-grid">
                 <MiniStat
-                  label="PURCHASE ORDERS"
+                  label={purchaseOrderSection==="history"?"PURCHASE ORDER HISTORY":"PURCHASE ORDERS"}
                   value={purchaseOrderStats.total.toString()}
                 />
                 <MiniStat
-                  label="OPEN"
-                  value={purchaseOrderStats.open.toString()}
+                  label={purchaseOrderSection==="history"?"RECEIVED":"OPEN"}
+                  value={(purchaseOrderSection==="history"?purchaseOrderStats.received:purchaseOrderStats.open).toString()}
                 />
                 <MiniStat
-                  label="IN PROCESS"
-                  value={purchaseOrderStats.inProcess.toString()}
+                  label={purchaseOrderSection==="history"?"CLOSED":"IN PROCESS"}
+                  value={(purchaseOrderSection==="history"?purchaseOrderStats.closed:purchaseOrderStats.inProcess).toString()}
                 />
                 <MiniStat
-                  label="EXPECTED COST"
+                  label={purchaseOrderSection==="history"?"ORDER COST":"EXPECTED COST"}
                   value={money(purchaseOrderStats.expectedCost)}
                 />
               </div>
@@ -22916,7 +22925,7 @@ export default function Home() {
                     <option value="all">All purchase orders</option><option value="acknowledged">Acknowledged</option><option value="unacknowledged">Unacknowledged</option>
                   </select>
                 </label>
-                <span>{acknowledgementLoading?"Loading acknowledgement status…":`${scopedPurchaseOrders.filter(o=>isPoAcknowledged(o,acknowledgementLibrary.map(a=>a.purchase_order_id))).length} acknowledged · ${scopedPurchaseOrders.filter(o=>!isPoAcknowledged(o,acknowledgementLibrary.map(a=>a.purchase_order_id))).length} unacknowledged`}</span>
+                <span>{acknowledgementLoading?"Loading acknowledgement status…":`${sectionPurchaseOrders.filter(o=>isPoAcknowledged(o,acknowledgementLibrary.map(a=>a.purchase_order_id))).length} acknowledged · ${sectionPurchaseOrders.filter(o=>!isPoAcknowledged(o,acknowledgementLibrary.map(a=>a.purchase_order_id))).length} unacknowledged`}</span>
               </div>
               <div className="search-card">
                 <div className="search-icon">⌕</div>
@@ -22955,9 +22964,9 @@ export default function Home() {
                 ) : filteredPurchaseOrders.length === 0 ? (
                   <div className="empty-state">
                     <div className="empty-icon">▥</div>
-                    <strong>No purchase orders yet</strong>
+                    <strong>{purchaseOrderSearch||poAcknowledgementFilter!=="all"?"No matching purchase orders":purchaseOrderSection==="history"?"No purchase order history yet":"No active purchase orders"}</strong>
                     <span>
-                      Open a Sales Order and choose Generate POs.
+                      {purchaseOrderSection==="history"?"Fully received orders will appear here automatically.":"Received orders are available in Purchase Order History. Clear filters to see more orders."}
                     </span>
                   </div>
                 ) : (
@@ -23008,7 +23017,7 @@ export default function Home() {
                           </div>
 
                           <div className="po-status">
-                            {order.status}
+                            {purchaseOrderInHistory(order,items)&&order.status!=="Closed"?"Received":order.status}
                           </div>
 
                           <div className="quote-items-count">
