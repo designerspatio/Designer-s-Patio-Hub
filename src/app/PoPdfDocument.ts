@@ -75,7 +75,16 @@ export function makePoPdf(data: PoDocument, logoImage: PdfImage | null) {
   text(commands,318,y,"Designer's Patio",11,true);
   text(commands,318,y+17,"orders@designerspatio.com",9);
   y+=Math.max(vendorLines.length*16,32)+18;
-  const details=data.details.filter(d=>!["order date","status","vendor freight","po notes"].includes(d.label.toLowerCase()));
+  const shippingLabels=["ship to name","ship to contact","ship to phone","ship to address","ship to city","ship to state","ship to zip","delivery instructions"];
+  const shipping=(label:string)=>data.details.find(d=>d.label.toLowerCase()===label)?.value||"";
+  const destination=[shipping("ship to name"),shipping("ship to contact"),shipping("ship to phone"),shipping("ship to address"),[shipping("ship to city"),shipping("ship to state"),shipping("ship to zip")].filter(Boolean).join(", ")].filter(Boolean);
+  if(destination.length){
+    ensure(42);text(commands,34,y,"SHIP TO",9,true,NAVY);y+=18;
+    for(const value of destination){for(const line of wrap(value,526,10)){ensure(15);text(commands,42,y,line,10);y+=15;}}y+=12;
+  }
+  const instructions=shipping("delivery instructions");
+  if(instructions){ensure(40);text(commands,34,y,"DELIVERY INSTRUCTIONS",8,true,NAVY);y+=16;for(const line of wrap(instructions,526,9)){ensure(13);text(commands,42,y,line,9);y+=13;}y+=12;}
+  const details=data.details.filter(d=>!["order date","status","vendor freight","po notes",...shippingLabels].includes(d.label.toLowerCase()));
   for(let i=0;i<details.length;i+=2) {
     const cells=details.slice(i,i+2).map(d=>({...d,lines:wrap(d.value,246,9)}));
     const h=25+Math.max(...cells.map(c=>c.lines.length))*12; ensure(h);

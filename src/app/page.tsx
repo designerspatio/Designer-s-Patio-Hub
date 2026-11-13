@@ -22,6 +22,7 @@ import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
 import WarrantyDashboard from "./WarrantyDashboard";
+import { poShippingForm, poCostDrafts, poCostUpdates, effectivePoCost } from "./purchaseOrderDetails";
 import { mayManageClaims } from "./claims";
 import {defaultQuoteSalesperson,salespersonOptionName} from "./quoteSalesperson";
 import StockPurchaseOrders from "./StockPurchaseOrders";
@@ -469,6 +470,14 @@ type PurchaseOrder = {
   purchasing_factor_snapshot: number | null;
   tariff_pct_snapshot: number | null;
   surcharge_pct_snapshot: number | null;
+  ship_to_name: string | null;
+  ship_to_contact: string | null;
+  ship_to_phone: string | null;
+  ship_to_address: string | null;
+  ship_to_city: string | null;
+  ship_to_state: string | null;
+  ship_to_zip: string | null;
+  delivery_notes: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -504,10 +513,19 @@ type PurchaseOrderForm = {
   tracking_number: string;
   freight_amount: string;
   notes: string;
+  ship_to_name: string;
+  ship_to_contact: string;
+  ship_to_phone: string;
+  ship_to_address: string;
+  ship_to_city: string;
+  ship_to_state: string;
+  ship_to_zip: string;
+  delivery_notes: string;
+
 };
 
 const purchaseOrderColumns =
-  "id,po_number,sales_order_id,manufacturer_id,status,order_date,acknowledgement_number,acknowledgement_date,estimated_ship_date,actual_ship_date,carrier,tracking_number,freight_amount,notes,created_by,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,created_at,updated_at";
+  "id,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,po_number,sales_order_id,manufacturer_id,status,order_date,acknowledgement_number,acknowledgement_date,estimated_ship_date,actual_ship_date,carrier,tracking_number,freight_amount,notes,created_by,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,created_at,updated_at";
 
 const purchaseOrderItemColumns =
   "id,purchase_order_id,sales_order_item_id,manufacturer_id,sort_order,quantity,sku,description,finish,fabric_name,grade,unit_cost,acknowledged_unit_cost,received_quantity,posted_quantity,created_at,updated_at";
@@ -939,6 +957,7 @@ const poStatuses = [
 
 function purchaseOrderToForm(order: PurchaseOrder): PurchaseOrderForm {
   return {
+    ...poShippingForm(order),
     status: order.status || "Draft",
     order_date: order.order_date || todayISO(),
     acknowledgement_number: order.acknowledgement_number || "",
@@ -2463,6 +2482,7 @@ export default function Home() {
     useState<PurchaseOrder | null>(null);
   const [purchaseOrderItems, setPurchaseOrderItems] =
     useState<PurchaseOrderItem[]>([]);
+  const [purchaseOrderCostDrafts, setPurchaseOrderCostDrafts] = useState<Record<string,string>>({});
   const [purchaseOrderModalOpen, setPurchaseOrderModalOpen] =
     useState(false);
   const [purchaseOrderForm, setPurchaseOrderForm] =
@@ -11619,6 +11639,8 @@ export default function Home() {
     setPurchaseOrderModalOpen(true);
     setPurchaseOrderAcknowledgements([]);
     setMessage("");
+    setPurchaseOrderItems([]);
+    setPurchaseOrderCostDrafts({});
 
     const [itemResult, acknowledgementResult] =
       await Promise.all([
@@ -11648,16 +11670,22 @@ export default function Home() {
       return;
     }
 
-    setPurchaseOrderItems(
-      (itemResult.data || []) as PurchaseOrderItem[]
-    );
+    setPurchaseOrderItems((itemResult.data || []) as PurchaseOrderItem[]);
+    setPurchaseOrderCostDrafts(poCostDrafts((itemResult.data || []) as PurchaseOrderItem[]));
     setPurchaseOrderAcknowledgements(
       (acknowledgementResult.data ||
         []) as PurchaseOrderAcknowledgement[]
     );
   }
 
+  function purchaseOrderHasEdits() {
+    return Boolean(selectedPurchaseOrder && purchaseOrderForm &&
+      (JSON.stringify(purchaseOrderForm)!==JSON.stringify(purchaseOrderToForm(selectedPurchaseOrder)) ||
+       JSON.stringify(purchaseOrderCostDrafts)!==JSON.stringify(poCostDrafts(purchaseOrderItems))));
+  }
   function closePurchaseOrderModal() {
+    if (savingPurchaseOrder || receivingPoItemId) return;
+    if (purchaseOrderHasEdits() && !window.confirm("Discard unsaved PO address or pricing changes?")) return;
     setPurchaseOrderModalOpen(false);
     setSelectedPurchaseOrder(null);
     setPurchaseOrderItems([]);
@@ -11914,7 +11942,8 @@ export default function Home() {
   }
 
   async function receivePurchaseOrderLine(item: PurchaseOrderItem) {
-    if (!supabase || !selectedPurchaseOrder || receivingPoItemId) return;
+    if (!supabase || !selectedPurchaseOrder || receivingPoItemId || savingPurchaseOrder) return;
+    if (purchaseOrderHasEdits()) {setMessage("Save your PO address and pricing changes before receiving items.");return;}
     const outstanding = Math.max(0,numberOrZero(item.quantity)-numberOrZero(item.received_quantity));
     if (!outstanding) return;
     const raw = window.prompt(`Receive quantity for ${item.sku || item.description || "PO item"} (up to ${outstanding})`,String(outstanding));
@@ -11936,55 +11965,26 @@ export default function Home() {
   }
 
   async function savePurchaseOrder() {
-    if (!supabase || !selectedPurchaseOrder || !purchaseOrderForm) {
-      return;
-    }
-
-    setSavingPurchaseOrder(true);
-    setMessage("");
-
-    const { data, error } = await supabase
-      .from("purchase_orders")
-      .update({
-        status: purchaseOrderForm.status,
-        order_date: purchaseOrderForm.order_date || todayISO(),
-        acknowledgement_number:
-          purchaseOrderForm.acknowledgement_number.trim() || null,
-        acknowledgement_date:
-          purchaseOrderForm.acknowledgement_date || null,
-        estimated_ship_date:
-          purchaseOrderForm.estimated_ship_date || null,
-        actual_ship_date:
-          purchaseOrderForm.actual_ship_date || null,
-        carrier: purchaseOrderForm.carrier.trim() || null,
-        tracking_number:
-          purchaseOrderForm.tracking_number.trim() || null,
-        freight_amount: numberOrZero(
-          purchaseOrderForm.freight_amount
-        ),
-        notes: purchaseOrderForm.notes.trim() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", selectedPurchaseOrder.id)
-      .select(purchaseOrderColumns)
-      .single();
-
-    if (error || !data) {
-      setMessage(
-        `Could not save purchase order: ${
-          error?.message || "Unknown error"
-        }`
-      );
-      setSavingPurchaseOrder(false);
-      return;
-    }
-
-    const updated = data as PurchaseOrder;
-    setSelectedPurchaseOrder(updated);
-    setPurchaseOrderForm(purchaseOrderToForm(updated));
-    await loadPurchaseOrders();
-    setSavingPurchaseOrder(false);
-    setMessage(`PO #${updated.po_number} saved.`);
+    if (!supabase || !selectedPurchaseOrder || !purchaseOrderForm || savingPurchaseOrder) return;
+    let costItems;
+    try { costItems=poCostUpdates(purchaseOrderItems,purchaseOrderCostDrafts); }
+    catch(error){setMessage((error as Error).message);return;}
+    const freight=Number(purchaseOrderForm.freight_amount);
+    if(!Number.isFinite(freight)||freight<0||freight>100000000){setMessage("Enter valid, non-negative vendor freight.");return;}
+    setSavingPurchaseOrder(true);setMessage("");
+    try {
+      const {data,error}=await supabase.rpc("dp_save_purchase_order_details",{
+        p_id:selectedPurchaseOrder.id,p_expected_updated_at:selectedPurchaseOrder.updated_at,
+        p_header:{...purchaseOrderForm,freight_amount:freight,order_date:purchaseOrderForm.order_date||todayISO()},
+        p_items:costItems,
+      });
+      if(error||!data){setMessage(`Could not save purchase order: ${error?.message||"Unknown error"}`);return;}
+      const updated=data as PurchaseOrder;
+      await openPurchaseOrder(updated);
+      await Promise.all([loadPurchaseOrders(),loadSalesOrders()]);
+      setMessage(`PO #${updated.po_number} saved, including ship-to details and confirmed pricing.`);
+    }catch(error){setMessage(`Could not save purchase order: ${(error as Error).message}`);}
+    finally{setSavingPurchaseOrder(false);}
   }
 
   async function generatePurchaseOrdersFromSale() {
@@ -27860,6 +27860,15 @@ export default function Home() {
                   />
                 </FormField>
 
+                <div className="form-field wide"><strong>Ship to</strong><small>Copied from the original sales order. Changes here apply to this PO.</small></div>
+                <FormField label="Ship To Name"><input value={purchaseOrderForm.ship_to_name} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_name",e.target.value)} /></FormField>
+                <FormField label="Ship To Contact"><input value={purchaseOrderForm.ship_to_contact} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_contact",e.target.value)} /></FormField>
+                <FormField label="Ship To Phone"><input value={purchaseOrderForm.ship_to_phone} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_phone",e.target.value)} /></FormField>
+                <FormField label="Ship To Address" wide><textarea rows={2} value={purchaseOrderForm.ship_to_address} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_address",e.target.value)} /></FormField>
+                <FormField label="Ship To City"><input value={purchaseOrderForm.ship_to_city} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_city",e.target.value)} /></FormField>
+                <FormField label="Ship To State"><input value={purchaseOrderForm.ship_to_state} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_state",e.target.value)} /></FormField>
+                <FormField label="Ship To ZIP"><input value={purchaseOrderForm.ship_to_zip} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("ship_to_zip",e.target.value)} /></FormField>
+                <FormField label="Delivery Instructions" wide><textarea rows={2} value={purchaseOrderForm.delivery_notes} disabled={savingPurchaseOrder} onChange={e=>updatePurchaseOrderForm("delivery_notes",e.target.value)} /></FormField>
                 <FormField label="PO Notes" wide>
                   <textarea
                     rows={3}
@@ -27886,10 +27895,7 @@ export default function Home() {
                   </div>
                 ) : (
                   purchaseOrderItems.map((item) => {
-                    const activeUnitCost = numberOrZero(
-                      item.acknowledged_unit_cost ??
-                        item.unit_cost
-                    );
+                    const activeUnitCost = effectivePoCost(item,purchaseOrderCostDrafts);
                     const extended =
                       numberOrZero(item.quantity) *
                       activeUnitCost;
@@ -27928,29 +27934,30 @@ export default function Home() {
                           <span>QTY</span>
                           <strong>{item.quantity}</strong>
                         </div>
-                        {!isManufacturerCharge(item) && item.sales_order_item_id && (
-                          <div style={{display:"grid",gap:5,minWidth:135}}>
+                        {!isManufacturerCharge(item) && item.sales_order_item_id ? (
+                          <div style={{display:"grid",gap:5,minWidth:0}}>
                             <small>Received: {numberOrZero(item.received_quantity)} / {item.quantity}</small>
                             <small>Posted: {numberOrZero(item.posted_quantity)}</small>
                             {numberOrZero(item.received_quantity) < numberOrZero(item.quantity) &&
                               <button type="button" className="new-client-button"
-                                disabled={Boolean(receivingPoItemId)}
+                                disabled={Boolean(receivingPoItemId)||savingPurchaseOrder}
                                 onClick={()=>void receivePurchaseOrderLine(item)}>
                                 {receivingPoItemId===item.id?"Receiving...":"Receive Items"}
                               </button>}
                           </div>
-                        )}
+                        ) : <div />}
 
 
                         <div className="po-item-number">
-                          <span>
-                            {item.acknowledged_unit_cost != null
-                              ? "ACK COST"
-                              : "EXPECTED COST"}
-                          </span>
-                          <strong>
-                            {money(activeUnitCost)}
-                          </strong>
+                          <span>CONFIRMED UNIT COST</span>
+                          <strong data-po-effective-cost>{money(activeUnitCost)}</strong>
+                          <input type="number" min="0" max="100000000" step="0.01" inputMode="decimal"
+                            aria-label={`Confirmed unit cost for ${item.sku||item.description||"PO item"}`}
+                            placeholder={String(item.unit_cost)} disabled={savingPurchaseOrder}
+                            value={purchaseOrderCostDrafts[item.id]??""}
+                            onChange={e=>setPurchaseOrderCostDrafts(current=>({...current,[item.id]:e.target.value}))}
+                            style={{width:"100%",maxWidth:140,textAlign:"right"}} />
+                          <small>Estimate: {money(item.unit_cost)} · blank uses estimate</small>
                         </div>
 
                         <div className="po-item-number">
@@ -27968,10 +27975,7 @@ export default function Home() {
                   (sum, item) =>
                     sum +
                     numberOrZero(item.quantity) *
-                      numberOrZero(
-                        item.acknowledged_unit_cost ??
-                          item.unit_cost
-                      ),
+                      effectivePoCost(item,purchaseOrderCostDrafts),
                   0
                 );
 
@@ -27983,9 +27987,9 @@ export default function Home() {
                   <div className="po-total-box">
                     <div>
                       <span>Merchandise Cost</span>
-                      <strong>{money(merchandise - purchaseOrderItems.filter(isManufacturerCharge).reduce((sum, item) => sum + numberOrZero(item.quantity) * numberOrZero(item.acknowledged_unit_cost ?? item.unit_cost), 0))}</strong>
+                      <strong>{money(merchandise - purchaseOrderItems.filter(isManufacturerCharge).reduce((sum, item) => sum + numberOrZero(item.quantity) * effectivePoCost(item,purchaseOrderCostDrafts), 0))}</strong>
                     </div>
-                    {purchaseOrderItems.filter(isManufacturerCharge).map(item => <div key={item.id}><span>{item.description}</span><strong>{money(numberOrZero(item.quantity) * numberOrZero(item.acknowledged_unit_cost ?? item.unit_cost))}</strong></div>)}
+                    {purchaseOrderItems.filter(isManufacturerCharge).map(item => <div key={item.id}><span>{item.description}</span><strong>{money(numberOrZero(item.quantity) * effectivePoCost(item,purchaseOrderCostDrafts))}</strong></div>)}
                     <div>
                       <span>Vendor Freight</span>
                       <strong>{money(freight)}</strong>
@@ -35274,7 +35278,7 @@ const appCss = `
 
   .po-item-row {
     display: grid;
-    grid-template-columns: minmax(0,1fr) 55px 110px 100px;
+    grid-template-columns: minmax(0,1fr) 45px 125px 155px 85px;
     gap: 12px;
     align-items: center;
     padding: 12px 14px;
@@ -41629,6 +41633,11 @@ const appCss = `
 
   .quote-price-browser-empty span {
     margin-top: 4px;
+  }
+
+  @media (max-width: 850px) {
+    .po-item-row { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .po-item-main { grid-column: 1 / -1; }
   }
 
   @media (max-width: 650px) {
