@@ -5,6 +5,8 @@ require.extensions['.ts']=(m,f)=>{
  source=source.replace(/import \{([^}]+)\} from ['"]([^'"]+)['"];?/g,'const {$1}=require("$2");').replace(/export /g,'');
  m._compile(source+'\nObject.assign(module.exports,{'+names.join(',')+'});',f);
 };
+const originalFetch=global.fetch;
+global.fetch=async(url,options)=>{const response=await originalFetch(url,options);const host=new URL(String(url)).hostname;if(['oauth2.googleapis.com','sheets.googleapis.com'].includes(host))console.log('SHEETS_CONNECTION_CHECK '+host+' HTTP '+response.status);return response;};
 const {syncClaim,sheetConfigured}=require('../src/app/api/claims/sheets.ts');
 const {createClient}=require('@supabase/supabase-js');
 (async()=>{
@@ -12,6 +14,7 @@ const {createClient}=require('@supabase/supabase-js');
  const db=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY||process.env.SUBABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
  const result=await db.from('warranty_claims').select('*').order('claim_number');
  if(result.error)throw new Error('Unable to load pending claims for sync verification.');
+ console.log('CLAIMS_DATABASE_READ_OK');
  let count=0;
  for(const initial of result.data){
   if(initial.synced_version===initial.version)continue;
