@@ -17,3 +17,15 @@ Hub saves complete before Google sync runs through Next.js `after`. Missing cred
 ## Verification
 
 Run `node --test tests/claims*.test.cjs tests/dashboard-mode.test.cjs tests/crm-workspace.test.cjs` and `npm run build`. The migration is `supabase/migrations/20261113173754_warranty_claims.sql`.
+
+## Original merchandise, parts and freight
+
+Choose a customer, manufacturer and original sales order to import selected original items and quantities. Imports preserve source item IDs and cannot exceed the original quantity or cross customer/manufacturer boundaries. Original merchandise can use No return, which requires no inventory posting.
+
+Items / parts to order is separate from original merchandise. Add items or parts manually, or copy claim merchandise into reorder lines. Only the ordering lines appear on the claims PO and in replacement receiving. Additional parts can amend an open claims PO; already issued lines remain fixed. Closed POs cannot receive new lines. Legacy claims preserve their existing replacement lines and receiving quantities. Freight claim references are recorded on the claim, included on its printed PO, and exported to the connected sheet.
+
+## Manufacturer account credits
+
+Record the actual issued credit memo, date and amount. Apply some or all of its available balance to invoices for the same manufacturer. Each application creates a non-cash vendor settlement with payment method Account Credit, so existing Hub payable calculations subtract it from the invoice balance. Unused credit stays available. Unapply an allocation from its claim to restore both balances; void unused mistaken credits while retaining their audit trail. Credit actions also remain available on closed claims.
+
+The server-only credit RPC locks the claim, credit and invoice, enforces balances and manufacturer identity, and uses request IDs to make retries idempotent. Credit-backed payments cannot be edited or deleted through ordinary vendor-payment controls. They are blocked from the QuickBooks bank-payment sync path; vendor credits must be reconciled as vendor credits in QuickBooks. No credit changes customer revenue, tax or customer cash receipts.

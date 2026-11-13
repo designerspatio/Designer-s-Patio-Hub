@@ -16508,6 +16508,7 @@ export default function Home() {
       return;
     }
 
+    if(editingVendorPaymentId&&vendorPayments.find(p=>p.id===editingVendorPaymentId)?.payment_method==="Account Credit"){window.alert("Manage account-credit applications from their warranty claim.");return;}
     const amount = numberOrZero(
       vendorPaymentForm.amount
     );
@@ -18644,7 +18645,7 @@ export default function Home() {
     loadingPurchases={purchaseOrdersLoading || acknowledgementLoading}
     onPurchaseOrder={id=>{const order=purchaseOrders.find(o=>o.id===id);if(order)void openPurchaseOrder(order);}}
     onAcknowledgements={()=>{setPurchaseOrderSection("active");setPoAcknowledgementFilter("unacknowledged");setView("purchase_orders");setRecordScope("all");setScopeSalespersonId("");}}
-    onRefresh={async()=>{await Promise.all([loadPurchaseOrders(),loadAcknowledgementLibrary(),loadInventoryItems()]);}}
+    onRefresh={async()=>{await Promise.all([loadPurchaseOrders(),loadAcknowledgementLibrary(),loadInventoryItems(),loadAccounting()]);}}
   /> : null;
 
   return (

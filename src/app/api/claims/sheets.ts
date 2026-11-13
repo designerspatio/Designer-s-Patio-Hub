@@ -20,9 +20,9 @@ export async function syncClaim(claim:Claim){
   // A dedicated tab preserves Niyah's existing claims and column layout.
   try{await call(':batchUpdate','POST',{requests:[{addSheet:{properties:{title:TAB}}}]});}catch{const retry=await call('?fields=sheets.properties');if(!retry.sheets?.some((s:{properties:{title:string}})=>s.properties.title===TAB))throw new Error('Could not create the Hub Claims tab.');}
  }
- const header=['Claim #','Opened','Customer','Manufacturer','Sales order','Items','Issue','Status','Vendor reference','Claims PO','Acknowledgement','Expected ship date','Received','Returned merchandise','Invoice','Notes','Updated','Hub link'];
- await call(`/values/${encodeURIComponent("'Hub Claims'!A1:R1")}?valueInputOption=RAW`,'PUT',{values:[header]});
+ const header=['Claim #','Opened','Customer','Manufacturer','Sales order','Items','Issue','Status','Vendor reference','Claims PO','Acknowledgement','Expected ship date','Received','Returned merchandise','Invoice','Notes','Updated','Hub link','Freight claim references','Items and parts ordered','Account credits'];
+ await call(`/values/${encodeURIComponent("'Hub Claims'!A1:U1")}?valueInputOption=RAW`,'PUT',{values:[header]});
  // Stable, unique claim numbers map to stable rows; retries cannot append duplicates.
  const row=claim.claim_number+1;
- await call(`/values/${encodeURIComponent(`'Hub Claims'!A${row}:R${row}`)}?valueInputOption=RAW`,'PUT',{values:[sheetValues(claim,process.env.HUB_PUBLIC_URL||'https://designer-s-patio-hub.vercel.app')]});
+ await call(`/values/${encodeURIComponent(`'Hub Claims'!A${row}:U${row}`)}?valueInputOption=RAW`,'PUT',{values:[sheetValues(claim,process.env.HUB_PUBLIC_URL||'https://designer-s-patio-hub.vercel.app')]});
 }

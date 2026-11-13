@@ -3137,6 +3137,8 @@ export async function POST(
 
       const payment =
         paymentData as HubVendorPayment;
+      if(payment.payment_method==="Account Credit")return NextResponse.json({error:"Account credits are non-cash. Record the vendor credit in QuickBooks; do not push it as a bank payment."},{status:400});
+
 
       if (
         payment.qbo_bill_payment_id
