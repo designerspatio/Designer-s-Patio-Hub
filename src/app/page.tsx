@@ -21,6 +21,8 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
+import WarrantyDashboard from "./WarrantyDashboard";
+import { mayManageClaims } from "./claims";
 import {defaultQuoteSalesperson,salespersonOptionName} from "./quoteSalesperson";
 import StockPurchaseOrders from "./StockPurchaseOrders";
 import InventoryQrTag from "./InventoryQrTag";
@@ -42,7 +44,7 @@ import {
   type ReactNode,
 } from "react";
 
-type View = "dashboard" | "stock_orders" | "clients" | "scan" | "manufacturers" | "quotes" | "sales" | "purchase_orders" | "inventory" | "daily_cash" | "accounting" | "catalogs" | "price_lists" | "ai_finder" | "acknowledgements" | "reports" | "team" | "settings";
+type View = "claims" | "dashboard" | "stock_orders" | "clients" | "scan" | "manufacturers" | "quotes" | "sales" | "purchase_orders" | "inventory" | "daily_cash" | "accounting" | "catalogs" | "price_lists" | "ai_finder" | "acknowledgements" | "reports" | "team" | "settings";
 type ClientMode = "view" | "edit" | "new";
 type ManufacturerMode = "view" | "edit" | "new";
 
@@ -2359,6 +2361,7 @@ export default function Home() {
   const canGenerateSalesPO = Boolean(profile?.active !== false && ["17b37a5d-1774-46fe-ae3a-b3ce76671e02", "1e670fd1-6576-4d63-a8d4-d828c8a98025"].includes(profile?.id || ""));
   const canCorrectPostedCash = Boolean(profile?.active !== false && ["17b37a5d-1774-46fe-ae3a-b3ce76671e02", "a31a3c72-7f3d-4b62-a61a-04442c20c896"].includes(profile?.id || ""));
   const [dashboardDirty, setDashboardDirty] = useState(false);
+  const [claimsDirty, setClaimsDirty] = useState(false);
   const [recordScope, setRecordScope] = useState<RecordScope>("mine");
   const [scopeSalespersonId, setScopeSalespersonId] = useState("");
 
@@ -4167,6 +4170,12 @@ export default function Home() {
 
 
   useEffect(() => {
+    if (profile?.id && mayManageClaims(profile) && new URLSearchParams(window.location.search).has("claim")) {
+      setView(dashboardModeForProfile(profile) === "warranty" ? "dashboard" : "claims");
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
     loadProfile();
     loadTeam();
     loadClients();
@@ -4223,7 +4232,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!profile?.id || !session?.user?.id) return;
-    const financeRole = dashboardModeForProfile(profile) !== "sales" || ["Owner","Manager","Assistant Manager"].includes(profile.role);
+    const financeRole = ["owner","payables","receivables"].includes(dashboardModeForProfile(profile)) || ["Owner","Manager","Assistant Manager"].includes(profile.role);
     if (financeRole) void loadExpenseAccounts();
   }, [profile?.id, profile?.role, profile?.display_name, session?.user?.id, loadExpenseAccounts]);
 
@@ -5228,7 +5237,7 @@ export default function Home() {
 
   async function signOut() {
     if (!supabase) return;
-    if (dashboardDirty && !window.confirm("Your personal workspace has unsaved changes. Sign out without saving?")) return;
+    if ((dashboardDirty || claimsDirty) && !window.confirm("Your personal workspace has unsaved changes. Sign out without saving?")) return;
     setDashboardDirty(false);
 
     await supabase.auth.signOut();
@@ -18800,7 +18809,7 @@ export default function Home() {
   // Sales-role dashboards continue rendering the same workspace as before.
   const personalDashboard = (
               <SalesDashboard
-              workspaceOnly={dashboardMode === "owner"}
+              workspaceOnly={dashboardMode === "owner" || dashboardMode === "warranty"}
               key={session.user.id}
               userId={session.user.id}
               firstName={firstName}
@@ -18821,6 +18830,18 @@ export default function Home() {
             />
   );
 
+  const warrantyDashboard = mayManageClaims(profile) ? <WarrantyDashboard
+    key={session.user.id + "-warranty"} supabase={supabase} firstName={firstName}
+    onDirtyChange={setClaimsDirty} workspace={dashboardMode === "warranty" ? personalDashboard : undefined}
+    clients={clients.map(c=>({id:c.id,name:getClientName(c)}))} manufacturers={manufacturers}
+    sales={salesOrders} inventory={inventoryItems} purchaseOrders={purchaseOrders}
+    acknowledgedIds={acknowledgementLibrary.map(a=>a.purchase_order_id)}
+    loadingPurchases={purchaseOrdersLoading || acknowledgementLoading}
+    onPurchaseOrder={id=>{const order=purchaseOrders.find(o=>o.id===id);if(order)void openPurchaseOrder(order);}}
+    onAcknowledgements={()=>setView("acknowledgements")}
+    onRefresh={async()=>{await Promise.all([loadPurchaseOrders(),loadAcknowledgementLibrary(),loadInventoryItems()]);}}
+  /> : null;
+
   return (
     <>
       <style>{appCss}</style>
@@ -18835,6 +18856,8 @@ export default function Home() {
               <div className="brand-hub">HUB</div>
             </div>
           </div>
+
+          {mayManageClaims(profile) && <button className="nav-button" onClick={()=>setView(dashboardMode === "warranty" ? "dashboard" : "claims")}>Warranty &amp; Claims</button>}
 
           <div className="sidebar-user">
             <div className="sidebar-user-name">
@@ -21698,7 +21721,7 @@ export default function Home() {
 
 
           <div hidden={view !== "dashboard"}>
-            {(dashboardMode === "sales" || dashboardMode === "owner") ? <>
+            {dashboardMode === "warranty" ? warrantyDashboard : (dashboardMode === "sales" || dashboardMode === "owner") ? <>
               {dashboardMode === "owner" && <OwnerDashboard
                 firstName={firstName}
                 sales={salesOrders}
@@ -21767,6 +21790,8 @@ export default function Home() {
               onRefresh={async () => { await Promise.all([loadSalesOrders(), loadAccounting(), loadDailyCashBatches(), loadExpenseAccounts()]); }}
             />}
           </div>
+
+          {view === "claims" && warrantyDashboard}
 
           {view === "scan" && (
             <section>

@@ -31,3 +31,8 @@ test("Account balances net recorded payments and reversals", () => {
   assert.equal(dateAtOrAfter("2026-11-04", "2026-11-01"), true);
   assert.equal(dateAtOrAfter("2026-10-01", "2026-11-01"), false);
 });
+test('Niyah opens warranty desk and other profiles retain their dashboards',()=>{
+ assert.equal(dashboardModeForProfile({display_name:'Niyah Brown',role:'Warranty Manager'}),'warranty');
+ assert.equal(dashboardModeForProfile({display_name:'Geneva',role:'Owner'}),'owner');
+ assert.equal(dashboardModeForProfile({display_name:'Shawna',role:'Manager'}),'sales');
+});

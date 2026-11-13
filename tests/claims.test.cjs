@@ -1,0 +1,15 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const {stripTypeScriptTypes}=require('node:module');
+const source=stripTypeScriptTypes(fs.readFileSync('src/app/claims.ts','utf8'),{mode:'transform'}).replace(/export /g,'');
+const mod={exports:{}};
+vm.runInNewContext(source+'\nmodule.exports={mayManageClaims,validateClaim,canCloseClaim,sheetValues};',{module:mod,Set,Number,Error});
+const {mayManageClaims,validateClaim,canCloseClaim,sheetValues}=mod.exports;
+const data=()=>({clientId:'client',clientName:'Client',manufacturerId:'vendor',manufacturerName:'Vendor',salesOrderNumber:'10',issue:'Broken frame',status:'Open',lines:[{id:'line',description:'Chair',sku:'A1',quantity:2,received:0,unitCost:0,disposition:'Return to stock',inventoryId:'stock'}],po:null,notes:'',vendorReference:''});
+test('only active warranty and management roles manage claims',()=>{for(const role of ['Warranty Manager','Owner','Manager','Assistant Manager'])assert.equal(mayManageClaims({role,active:true}),true);for(const role of ['Sales','Shipping / Accounting',''])assert.equal(mayManageClaims({role,active:true}),false);assert.equal(mayManageClaims({role:'Warranty Manager',active:false}),false);assert.equal(mayManageClaims(null),false);});
+test('claims permit zero cost replacements but reject invalid quantity and receiving',()=>{assert.ok(validateClaim(data()));for(const quantity of [0,-1,1.5,NaN]){const d=data();d.lines[0].quantity=quantity;assert.throws(()=>validateClaim(d));}const d=data();d.lines[0].received=3;assert.throws(()=>validateClaim(d));});
+test('duplicate line IDs and negative replacement costs are rejected',()=>{const d=data();d.lines.push({...d.lines[0]});assert.throws(()=>validateClaim(d));const x=data();x.lines[0].unitCost=-1;assert.throws(()=>validateClaim(x));});
+test('closure requires completed dispositions and a closed claims PO',()=>{const d=data();assert.equal(canCloseClaim(d),false);d.lines[0].dispositionCompletedAt='2026-11-13';assert.equal(canCloseClaim(d),true);d.po={closedAt:''};assert.equal(canCloseClaim(d),false);d.po.closedAt='2026-11-13';assert.equal(canCloseClaim(d),true);});
+test('Google Sheet export preserves claim identity and uses a deep link',()=>{const c={id:'abc',claim_number:7,created_at:'2026-11-13T12:00:00Z',updated_at:'2026-11-13T12:01:00Z',data:data()};const row=sheetValues(c,'https://hub.example');assert.equal(row.length,18);assert.equal(row[0],'CL-7');assert.equal(row[17],'https://hub.example/?claim=abc');assert.match(row[5],/2 × A1 Chair/);});

@@ -1,4 +1,4 @@
-export type DashboardMode = "sales" | "owner" | "payables" | "receivables";
+export type DashboardMode = "sales" | "owner" | "payables" | "receivables" | "warranty";
 export type DashboardIdentity = { display_name?: string | null; role?: string | null; email?: string | null } | null | undefined;
 
 // Named accounting logins can share a Hub role while having distinct home screens.
@@ -8,6 +8,7 @@ export function dashboardModeForProfile(profile: DashboardIdentity): DashboardMo
   const name = (profile.display_name || "").trim().toLowerCase();
   const role = (profile.role || "").trim().toLowerCase();
   const email = (profile.email || "").trim().toLowerCase().split("@")[0];
+  if (role === "warranty manager") return "warranty";
   if (role === "owner") return "owner";
   if (/\bpamela\b/.test(name) || role === "accounts payable") return "payables";
   if (/\baccounting\s+team\b/.test(name) || role === "accounts receivable" || email === "accounting") return "receivables";
