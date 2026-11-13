@@ -1,6 +1,11 @@
-const fs=require('node:fs'),ts=require('typescript');
-require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,f);
-const {syncClaim,sheetConfigured}=require('./src/app/api/claims/sheets.ts');
+const fs=require('node:fs'),{stripTypeScriptTypes}=require('node:module');
+require.extensions['.ts']=(m,f)=>{
+ let source=stripTypeScriptTypes(fs.readFileSync(f,'utf8'),{mode:'transform'});
+ const names=[...source.matchAll(/export (?:async )?(?:function|const|class) (\w+)/g)].map(x=>x[1]);
+ source=source.replace(/import \{([^}]+)\} from ['"]([^'"]+)['"];?/g,'const {$1}=require("$2");').replace(/export /g,'');
+ m._compile(source+'\nObject.assign(module.exports,{'+names.join(',')+'});',f);
+};
+const {syncClaim,sheetConfigured}=require('../src/app/api/claims/sheets.ts');
 const {createClient}=require('@supabase/supabase-js');
 (async()=>{
  if(!sheetConfigured())throw new Error('Google credential is missing from Production.');
