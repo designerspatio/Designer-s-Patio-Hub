@@ -5,3 +5,5 @@ function context(role,active=true){process.env.NEXT_PUBLIC_SUPABASE_URL='https:/
 const request=t=>({headers:new Headers(t?{authorization:`Bearer ${t}`}:{})});
 test('claims API rejects missing and invalid authentication',async()=>{const c=context('Warranty Manager');await assert.rejects(c(request()),e=>e.status===401);await assert.rejects(c(request('invalid')),e=>e.status===401);});
 test('claims API authorizes current server-side role and active flag',async()=>{assert.equal((await context('Warranty Manager')(request('valid'))).user.id,'verified-user');for(const role of ['Sales','Shipping / Accounting'])await assert.rejects(context(role)(request('valid')),e=>e.status===403);await assert.rejects(context('Warranty Manager',false)(request('valid')),e=>e.status===403);});
+
+test('all active team roles can view claims but cannot manage them',async()=>{for(const role of ['Sales','Shipping / Accounting','Team Member']){assert.equal((await context(role)(request('valid'),false)).user.id,'verified-user');await assert.rejects(context(role)(request('valid')),e=>e.status===403);}await assert.rejects(context('Sales',false)(request('valid'),false),e=>e.status===403);});

@@ -1,7 +1,7 @@
 import {NextResponse,after} from 'next/server';
 import {claimsContext,HttpError} from './context';
 import {sheetConfigured,syncClaim} from './sheets';
-import {validateClaim,canCloseClaim,claimOrderLines,type Claim,type ClaimData} from '../../claims';
+import {mayManageClaims,validateClaim,canCloseClaim,claimOrderLines,type Claim,type ClaimData} from '../../claims';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 export const maxDuration=60;
@@ -35,8 +35,9 @@ async function queueSync(admin:Admin,saved:Claim){
  else{saved.sync_error='Google Sheet connection needs a service account. Claim is saved; retry sync after setup.';after(async()=>{await admin.from('warranty_claims').update({sync_error:saved.sync_error}).eq('id',saved.id);});}
 }
 export async function GET(request:Request){try{
- const {admin}=await claimsContext(request);const url=new URL(request.url);
+ const {admin,profile}=await claimsContext(request,false);const url=new URL(request.url);
  if(url.searchParams.has('salesOrderId')){
+  if(!mayManageClaims(profile))throw new HttpError('Importing original sales-order items is limited to claim managers.',403);
   const id=url.searchParams.get('salesOrderId'),clientId=url.searchParams.get('clientId'),manufacturerId=url.searchParams.get('manufacturerId');
   const order=await admin.from('sales_orders').select('id,client_id').eq('id',id).single();if(order.error||order.data.client_id!==clientId)throw new HttpError('Choose an original sales order belonging to this customer.');
   const result=await admin.from('sales_order_items').select('id,sales_order_id,manufacturer_id,sku,description,finish,fabric_name,quantity,expected_unit_cost,acknowledged_unit_cost,inventory_item_id').eq('sales_order_id',id).eq('manufacturer_id',manufacturerId).order('sort_order');
@@ -44,6 +45,7 @@ export async function GET(request:Request){try{
   return json({items:(result.data||[]).filter(i=>!/^__DP_(TARIFF|SURCHARGE)__/.test(i.sku||''))});
  }
  if(url.searchParams.has('creditsFor')){
+  if(!mayManageClaims(profile))throw new HttpError('Account credit details are limited to warranty and management accounts.',403);
   const id=url.searchParams.get('creditsFor');const claim=await admin.from('warranty_claims').select('*').eq('id',id).single();if(claim.error)throw new HttpError('Claim not found.',404);
   const credits=await admin.from('claim_vendor_credits').select('*').eq('claim_id',id).order('created_at');if(credits.error)throw new HttpError('Credits could not be loaded.',503);
   const ids=(credits.data||[]).map(c=>c.id);

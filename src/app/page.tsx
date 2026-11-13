@@ -18636,9 +18636,10 @@ export default function Home() {
             />
   );
 
-  const warrantyDashboard = mayManageClaims(profile) ? <WarrantyDashboard
+  const warrantyDashboard = <WarrantyDashboard
+    readOnly={!mayManageClaims(profile)}
     key={session.user.id + "-warranty"} supabase={supabase} firstName={firstName}
-    onDirtyChange={setClaimsDirty} workspace={dashboardMode === "warranty" ? personalDashboard : undefined}
+    onDirtyChange={setClaimsDirty} workspace={dashboardMode === "warranty" && view === "dashboard" ? personalDashboard : undefined}
     clients={clients.map(c=>({id:c.id,name:getClientName(c)}))} manufacturers={manufacturers}
     sales={salesOrders} inventory={inventoryItems} purchaseOrders={purchaseOrders}
     acknowledgedIds={acknowledgementLibrary.map(a=>a.purchase_order_id)}
@@ -18646,7 +18647,7 @@ export default function Home() {
     onPurchaseOrder={id=>{const order=purchaseOrders.find(o=>o.id===id);if(order)void openPurchaseOrder(order);}}
     onAcknowledgements={()=>{setPurchaseOrderSection("active");setPoAcknowledgementFilter("unacknowledged");setView("purchase_orders");setRecordScope("all");setScopeSalespersonId("");}}
     onRefresh={async()=>{await Promise.all([loadPurchaseOrders(),loadAcknowledgementLibrary(),loadInventoryItems(),loadAccounting()]);}}
-  /> : null;
+  />;
 
   return (
     <>
@@ -18663,7 +18664,6 @@ export default function Home() {
             </div>
           </div>
 
-          {mayManageClaims(profile) && <button className="nav-button" onClick={()=>setView(dashboardMode === "warranty" ? "dashboard" : "claims")}>Warranty &amp; Claims</button>}
 
           <div className="sidebar-user">
             <div className="sidebar-user-name">
@@ -18830,6 +18830,7 @@ export default function Home() {
 
             <div className="nav-group">
               <div className="nav-heading">OPERATIONS</div>
+              <button className={`nav-button ${view === "claims" ? "active" : ""}`} onClick={()=>{setView("claims");setMessage("");}}><span>▤</span>Claims</button>
 
               <button
                 className={`nav-button ${
