@@ -6,7 +6,7 @@ export type ClaimOrderLine = {id:string;kind:'Item'|'Part'|'Reorder';sourceClaim
 export type ClaimCreditSummary={id:string;reference:string;amount:number;applied:number;remaining:number;voided:boolean};
 export type ClaimPO = {number:string; createdAt:string; acknowledgement:string; expectedShipDate:string; invoiceRequired:boolean; invoiceReference:string; freight:number; closedAt:string};
 export type Claim = {id:string; claim_number:number; version:number; created_at:string; updated_at:string; data:ClaimData; sync_error:string|null; synced_at:string|null; synced_version:number|null};
-export type ClaimData = {clientId:string; clientName:string; manufacturerId:string; manufacturerName:string; salesOrderId:string; salesOrderNumber:string; issue:string; status:string; notes:string; vendorReference:string; lines:ClaimLine[]; orderLines?:ClaimOrderLine[]; freightClaimReferences?:string; accountCredits?:ClaimCreditSummary[]; po:ClaimPO|null; history:{at:string;by:string;action:string}[]};
+export type ClaimData = {clientId:string; clientName:string; manufacturerId:string; manufacturerName:string; salesOrderId:string; salesOrderNumber:string; issue:string; status:string; notes:string; vendorReference:string; shipToAddress?:string; lines:ClaimLine[]; orderLines?:ClaimOrderLine[]; freightClaimReferences?:string; accountCredits?:ClaimCreditSummary[]; po:ClaimPO|null; history:{at:string;by:string;action:string}[]};
 export function mayManageClaims(profile:{role?:string;display_name?:string;active?:boolean}|null) {return !!profile && profile.active!==false && ['Owner','Manager','Assistant Manager','Warranty Manager'].includes(profile.role||'');}
 export function validateClaim(value:unknown):ClaimData {
  const d=value as ClaimData;
@@ -22,6 +22,7 @@ export function validateClaim(value:unknown):ClaimData {
   if(!DISPOSITIONS.includes(l.disposition as typeof DISPOSITIONS[number]))throw new Error('Choose a valid return disposition.');
   if(!Number.isFinite(l.unitCost)||l.unitCost<0||!Number.isSafeInteger(l.received)||l.received<0||l.received>l.quantity)throw new Error('Check item cost and received quantity.');
  }
+ if(d.shipToAddress!==undefined&&(typeof d.shipToAddress!=='string'||d.shipToAddress.length>2000))throw new Error('Ship-to address must be under 2,000 characters.');
  if(d.orderLines!==undefined)validateClaimOrderLines(d.orderLines);
  if(typeof d.freightClaimReferences!=='undefined'&&(typeof d.freightClaimReferences!=='string'||d.freightClaimReferences.length>4000))throw new Error('Freight references must be under 4,000 characters.');
  if(d.po && (!Number.isFinite(d.po.freight)||d.po.freight<0))throw new Error('Freight must be zero or greater.');
