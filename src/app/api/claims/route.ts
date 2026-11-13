@@ -32,7 +32,7 @@ async function lookupNames(admin:Admin,d:ClaimData){
 }
 async function queueSync(admin:Admin,saved:Claim){
  if(sheetConfigured())after(async()=>{try{await sync(admin,saved.id);}catch{await admin.from('warranty_claims').update({sync_error:'Google Sheet sync failed. Use Retry sheet sync.'}).eq('id',saved.id);}});
- else{saved.sync_error='Google Sheet connection needs a service account. Claim is saved; retry sync after setup.';await admin.from('warranty_claims').update({sync_error:saved.sync_error}).eq('id',saved.id);}
+ else{saved.sync_error='Google Sheet connection needs a service account. Claim is saved; retry sync after setup.';after(async()=>{await admin.from('warranty_claims').update({sync_error:saved.sync_error}).eq('id',saved.id);});}
 }
 export async function GET(request:Request){try{
  const {admin}=await claimsContext(request);const url=new URL(request.url);
@@ -70,9 +70,9 @@ export async function POST(request:Request){try{
  if(body.id){const r=await admin.from('warranty_claims').select('*').eq('id',body.id).single();if(r.error)throw new HttpError('Claim not found.',404);current=r.data as Claim;if(current.version!==body.version)throw new HttpError('Claim changed on another device. Refresh and retry.',409);}
  if(body.action==='sync'){if(!current)throw new HttpError('Save the claim first.');await sync(admin,current.id);return json({claim:(await admin.from('warranty_claims').select('*').eq('id',current.id).single()).data});}
  let d:ClaimData;
- try{d=validateClaim(body.action==='save'||!current?body.data:structuredClone(current.data));}catch(e){throw new HttpError((e as Error).message);}
+ try{d=validateClaim(['save','save_and_generate_po'].includes(body.action)||!current?body.data:structuredClone(current.data));}catch(e){throw new HttpError((e as Error).message);}
  const now=new Date().toISOString();let inventoryId:string|null=null,quantity:number|null=null;
- if(body.action==='save'){
+ if(['save','save_and_generate_po'].includes(body.action)){
   d.po=current?.data.po||null;d.accountCredits=current?.data.accountCredits||[];
   if(d.orderLines!==undefined){const priorOrders=current?claimOrderLines(current.data):[];for(const order of d.orderLines)order.received=priorOrders.find(l=>l.id===order.id)?.received||0;}
   for(const line of d.lines){const prior=current?.data.lines.find(l=>l.id===line.id);line.received=prior?.received||0;line.dispositionCompletedAt=prior?.dispositionCompletedAt;
@@ -118,10 +118,16 @@ export async function POST(request:Request){try{
   if(claimOrderLines(d).some(l=>l.received<l.quantity))throw new HttpError('Receive all replacement items before closing the claims PO.');
   if(d.po.invoiceRequired&&!d.po.invoiceReference.trim())throw new HttpError('Record an invoice reference, or choose no invoice expected.');d.po.closedAt=now;
  }else throw new HttpError('Unknown claims action.');
+ if(body.action==='save_and_generate_po'){
+  if(d.po)throw new HttpError('This claim already has a PO.');
+  if(!d.issue.trim())throw new HttpError('Describe the issue before generating a claim PO.');
+  if(!claimOrderLines(d).length)throw new HttpError('Add items or parts to order before generating a claim PO.');
+  d.po={number:current?`CPO-${current.claim_number}`:'CPO-AUTO',createdAt:now,acknowledgement:'',expectedShipDate:'',invoiceRequired:false,invoiceReference:'',freight:0,closedAt:''};d.status='Replacement Ordered';
+ }
  if(d.status==='Closed'&&!canCloseClaim(d))throw new HttpError('Complete all return dispositions and close the claims PO first.');
  if(current?.data.status==='Closed')throw new HttpError('Closed claims cannot be changed.');
  d.history=[...(current?.data.history||[]),{at:now,by:profile.display_name||user.id,action:body.action}];
- const r=await admin.rpc('dp_save_warranty_claim',{p_id:current?.id||null,p_version:current?.version||0,p_data:d,p_actor:user.id,p_inventory_id:inventoryId,p_quantity:quantity});
+ const r=await admin.rpc(body.action==='save_and_generate_po'?'dp_save_warranty_claim_with_po':'dp_save_warranty_claim',{p_id:current?.id||null,p_version:current?.version||0,p_data:d,p_actor:user.id,p_inventory_id:inventoryId,p_quantity:quantity});
  if(r.error)throw new HttpError(/another device/.test(r.error.message)?r.error.message:'Claim could not be saved. Refresh and retry.',/another device/.test(r.error.message)?409:503);
  const saved=confirmedClaim(r.data);
  await queueSync(admin,saved);

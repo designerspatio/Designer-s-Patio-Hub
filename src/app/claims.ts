@@ -1,4 +1,4 @@
-export const CLAIM_STATUSES = ['Open','Submitted','Approved','Replacement Ordered','Partially Received','Received','Closed','Denied'] as const;
+export const CLAIM_STATUSES = ['Draft','Open','Submitted','Approved','Replacement Ordered','Partially Received','Received','Closed','Denied'] as const;
 export const DISPOSITIONS = ['Pending','No return','Return to stock','Return to vendor','Field destroy'] as const;
 export const CLAIM_SHEET_ID = '1r4U88JfKK-9aMzxbUes0KxjuEKm4Mt6RgBwJ2pdSqsU';
 export type ClaimLine = {sourceSalesOrderItemId?:string; id:string; sku:string; description:string; finish:string; fabric:string; quantity:number; disposition:string; inventoryId:string; dispositionCompletedAt?:string; received:number; unitCost:number};
@@ -10,9 +10,11 @@ export type ClaimData = {clientId:string; clientName:string; manufacturerId:stri
 export function mayManageClaims(profile:{role?:string;display_name?:string;active?:boolean}|null) {return !!profile && profile.active!==false && ['Owner','Manager','Assistant Manager','Warranty Manager'].includes(profile.role||'');}
 export function validateClaim(value:unknown):ClaimData {
  const d=value as ClaimData;
- if(!d||typeof d!=='object'||!d.clientId||!d.manufacturerId||!String(d.issue||'').trim())throw new Error('Choose a customer and manufacturer and describe the issue.');
+ if(!d||typeof d!=='object'||!d.clientId||!d.manufacturerId)throw new Error('Choose a customer and manufacturer.');
  if(!CLAIM_STATUSES.includes(d.status as typeof CLAIM_STATUSES[number]))throw new Error('Choose a valid claim status.');
- if(!Array.isArray(d.lines)||d.lines.length<1||d.lines.length>100)throw new Error('Add between 1 and 100 claim items.');
+ if(d.status!=='Draft'&&!String(d.issue||'').trim())throw new Error('Describe the issue, or choose Draft to save your progress.');
+ if(!Array.isArray(d.lines)||d.lines.length>100)throw new Error('Add up to 100 claim items.');
+ d.lines=d.lines.filter(l=>l.description?.trim()||l.sku?.trim()||l.finish?.trim()||l.fabric?.trim()||l.quantity!==1||l.unitCost!==0||l.received!==0||l.disposition!=='Pending'||l.inventoryId||l.sourceSalesOrderItemId||l.dispositionCompletedAt);
  const ids=new Set<string>();
  for(const l of d.lines){
   if(!l.id||ids.has(l.id))throw new Error('Each claim item needs a unique ID.'); ids.add(l.id);
