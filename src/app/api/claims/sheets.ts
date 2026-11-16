@@ -22,7 +22,10 @@ export async function syncClaim(claim:Claim){
  }
  const header=['Claim #','Opened','Customer','Manufacturer','Sales order','Items','Issue','Status','Claim reference #','Claims PO','Acknowledgement','Expected ship date','Received','Returned merchandise','Invoice','Notes','Updated','Hub link','Freight claim references','Items and parts ordered','Account credits'];
  await call(`/values/${encodeURIComponent("'Hub Claims'!A1:U1")}?valueInputOption=RAW`,'PUT',{values:[header]});
- // Stable, unique claim numbers map to stable rows; retries cannot append duplicates.
- const row=claim.claim_number+1;
+ // Reserve legacy rows 2–99; the new 72000 range starts at row 100.
+ // Stable row mapping keeps retries idempotent.
+ const row=claim.claim_number>=72000?claim.claim_number-72000+100:claim.claim_number+1;
+ const sheet=meta.sheets?.find((s:{properties:{title:string}})=>s.properties.title===TAB);
+ if(sheet&&row>(sheet.properties.gridProperties?.rowCount||1000))await call(':batchUpdate','POST',{requests:[{appendDimension:{sheetId:sheet.properties.sheetId,dimension:'ROWS',length:row-(sheet.properties.gridProperties?.rowCount||1000)}}]});
  await call(`/values/${encodeURIComponent(`'Hub Claims'!A${row}:U${row}`)}?valueInputOption=RAW`,'PUT',{values:[sheetValues(claim,process.env.HUB_PUBLIC_URL||'https://designer-s-patio-hub.vercel.app')]});
 }

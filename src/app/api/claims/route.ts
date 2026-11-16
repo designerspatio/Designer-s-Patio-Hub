@@ -100,7 +100,8 @@ export async function POST(request:Request){try{
  }else if(body.action==='update_po'){
   if(!d.po||d.po.closedAt)throw new HttpError('An open claims PO is required.');
   const p=body.po||{};if(typeof p.invoiceRequired!=='boolean'||!Number.isFinite(p.freight)||p.freight<0)throw new HttpError('Check the invoice setting and freight.');
-  d.po={...d.po,acknowledgement:String(p.acknowledgement||'').slice(0,200),expectedShipDate:String(p.expectedShipDate||'').slice(0,10),invoiceRequired:p.invoiceRequired,invoiceReference:String(p.invoiceReference||'').slice(0,200),freight:p.freight};
+  const number=String(p.number??d.po.number).trim();if(!number||number.length>100||/[\r\n]/.test(number))throw new HttpError('Enter a claims PO number of up to 100 characters.');
+  d.po={...d.po,number,acknowledgement:String(p.acknowledgement||'').slice(0,200),expectedShipDate:String(p.expectedShipDate||'').slice(0,10),invoiceRequired:p.invoiceRequired,invoiceReference:String(p.invoiceReference||'').slice(0,200),freight:p.freight};
  }else if(body.action==='receive'){
   if(!d.po||d.po.closedAt)throw new HttpError('An open claims PO is required.');
   const line=(d.orderLines??d.lines).find(l=>l.id===body.lineId),qty=Number(body.quantity);

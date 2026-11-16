@@ -505,6 +505,7 @@ type PurchaseOrderItem = {
 };
 
 type PurchaseOrderForm = {
+  po_number: string;
   status: string;
   order_date: string;
   acknowledgement_number: string;
@@ -967,6 +968,7 @@ const poStatuses = [
 function purchaseOrderToForm(order: PurchaseOrder): PurchaseOrderForm {
   return {
     ...poShippingForm(order),
+    po_number: String(order.po_number),
     status: order.status || "Draft",
     order_date: order.order_date || todayISO(),
     acknowledgement_number: order.acknowledgement_number || "",
@@ -11767,6 +11769,7 @@ export default function Home() {
     let costItems;
     try { costItems=poCostUpdates(purchaseOrderItems,purchaseOrderCostDrafts); }
     catch(error){setPurchaseOrderSaveError((error as Error).message);return;}
+    if(!/^\d+$/.test(purchaseOrderForm.po_number.trim())||!Number.isSafeInteger(Number(purchaseOrderForm.po_number))||Number(purchaseOrderForm.po_number)<1){setPurchaseOrderSaveError("Enter a positive whole PO number.");return;}
     const freight=Number(purchaseOrderForm.freight_amount);
     if(!Number.isFinite(freight)||freight<0||freight>100000000){setPurchaseOrderSaveError("Enter valid, non-negative vendor freight.");return;}
     setSavingPurchaseOrder(true);
@@ -27540,6 +27543,7 @@ export default function Home() {
               </div>
 
               <div className="form-grid po-form-grid">
+                <FormField label="Purchase order number"><input inputMode="numeric" value={purchaseOrderForm.po_number} disabled={savingPurchaseOrder||uploadingAcknowledgement} onChange={e=>updatePurchaseOrderForm("po_number",e.target.value)}/></FormField>
                 <FormField label="Status">
                   <select
                     disabled={savingPurchaseOrder||uploadingAcknowledgement}
