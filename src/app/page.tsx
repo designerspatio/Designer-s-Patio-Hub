@@ -1,4 +1,5 @@
 "use client";
+import { sourceError, poGroupKey, comPoShipping, type ItemSource } from "./itemSource";
 
 import {availableToSell,validateInventoryCounts,validateQuoteInventory,validateSalesOrderInventory} from "./inventoryAvailability";
 
@@ -271,7 +272,9 @@ type Quote = {
   updated_at: string;
 };
 
-type QuoteItem = {
+
+
+type QuoteItem = ItemSource & {
   id?: string;
   local_id: string;
   quote_id?: string;
@@ -320,7 +323,7 @@ const quoteColumns =
   "id,quote_number,client_id,salesperson_user_id,status,approved,approved_at,converted_sales_order_id,quote_date,expiration_date,customer_po,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,notes,freight_amount,adjustment_amount,created_at,updated_at";
 
 const quoteItemColumns =
-  "id,quote_id,inventory_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,commissionable";
+  "id,item_type,com_ship_to,quote_id,inventory_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,commissionable";
 
 type SalesOrder = {
   id: string;
@@ -350,7 +353,7 @@ type SalesOrder = {
   updated_at: string;
 };
 
-type SalesOrderItem = {
+type SalesOrderItem = ItemSource & {
   id: string;
   sales_order_id: string;
   source_quote_item_id: string | null;
@@ -400,7 +403,7 @@ type SalesOrderEditForm = {
   tax_amount: string;
 };
 
-type SalesOrderItemDraft = {
+type SalesOrderItemDraft = ItemSource & {
   id?: string;
   local_id: string;
   source_quote_item_id: string | null;
@@ -431,7 +434,7 @@ const salesOrderColumns =
   "id,sale_number,source_quote_id,client_id,salesperson_user_id,status,order_date,customer_po,notes,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,freight_amount,adjustment_amount,tax_amount,qbo_invoice_id,qbo_sync_token,qbo_synced_at,created_at,updated_at";
 
 const salesOrderItemColumns =
-  "id,sales_order_id,source_quote_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,acknowledged_unit_cost,commissionable,fulfillment_method,inventory_item_id,posted_out_quantity,last_posted_out_at";
+  "id,item_type,com_ship_to,sales_order_id,source_quote_item_id,manufacturer_id,sort_order,quantity,image_url,sku,description,finish,fabric_name,grade,additional_details,msrp_at_grade,discount_pct,unit_price,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,expected_unit_cost,acknowledged_unit_cost,commissionable,fulfillment_method,inventory_item_id,posted_out_quantity,last_posted_out_at";
 
 type VendorFreight = {
   id: string;
@@ -454,6 +457,7 @@ const vendorFreightColumns =
 
 
 type PurchaseOrder = {
+  com_manufacturer_id?: string | null;
   id: string;
   po_number: number;
   sales_order_id: string;
@@ -528,7 +532,7 @@ type PurchaseOrderForm = {
 };
 
 const purchaseOrderColumns =
-  "id,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,po_number,sales_order_id,manufacturer_id,status,order_date,acknowledgement_number,acknowledgement_date,estimated_ship_date,actual_ship_date,carrier,tracking_number,freight_amount,notes,created_by,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,created_at,updated_at";
+  "id,com_manufacturer_id,ship_to_name,ship_to_contact,ship_to_phone,ship_to_address,ship_to_city,ship_to_state,ship_to_zip,delivery_notes,po_number,sales_order_id,manufacturer_id,status,order_date,acknowledgement_number,acknowledgement_date,estimated_ship_date,actual_ship_date,carrier,tracking_number,freight_amount,notes,created_by,purchasing_factor_snapshot,tariff_pct_snapshot,surcharge_pct_snapshot,created_at,updated_at";
 
 const purchaseOrderItemColumns =
   "id,purchase_order_id,sales_order_item_id,manufacturer_id,sort_order,quantity,sku,description,finish,fabric_name,grade,unit_cost,acknowledged_unit_cost,received_quantity,posted_quantity,created_at,updated_at";
@@ -2280,6 +2284,8 @@ function saleItemToDraft(
   return {
     id: item.id,
     local_id: item.id || newLocalId(),
+    item_type: item.item_type,
+    com_ship_to: item.com_ship_to,
     source_quote_item_id: item.source_quote_item_id,
     manufacturer_id: item.manufacturer_id || "",
     sort_order: item.sort_order,
@@ -2951,6 +2957,7 @@ export default function Home() {
     freight_amount: "0",
     adjustment_amount: "0",
   });
+  const [stockSearches, setStockSearches] = useState<Record<string,string>>({});
   const [rawQuoteItems, setQuoteItems] = useState<QuoteItem[]>([
     blankQuoteItem(0),
   ]);
@@ -8773,6 +8780,8 @@ export default function Home() {
 
   async function saveQuote() {
     if (!supabase) return;
+    const itemSourceError = sourceError(quoteItems);
+    if (itemSourceError) { setMessage(itemSourceError); return; }
     const chargeError = validateChargeSettings(quoteForm.notes);
     if (chargeError) { setMessage(chargeError); return; }
 
@@ -8867,6 +8876,8 @@ export default function Home() {
           numberOrZero(item.msrp_at_grade) > 0
       )
       .map((item, index) => ({
+        item_type: item.inventory_item_id ? "Stock Item" : item.item_type || "Special Order",
+        com_ship_to: item.item_type === "COM Fabric" ? item.com_ship_to || null : null,
         quote_id: quoteId,
         inventory_item_id: item.inventory_item_id || null,
         manufacturer_id: item.manufacturer_id || null,
@@ -9470,6 +9481,8 @@ export default function Home() {
     );
     if (!confirmed) return;
 
+    const itemSourceError = sourceError(quoteItems);
+    if (itemSourceError) { setMessage(itemSourceError); return; }
     const conversionStockError = validateQuoteInventory(
       quoteItems.filter((line) => !isManufacturerCharge(line) && line.inventory_item_id)
         .map((line) => ({inventory_item_id:line.inventory_item_id!,quantity:numberOrZero(line.quantity)})),
@@ -9543,6 +9556,8 @@ export default function Home() {
 
       return {
         sales_order_id: sale.id,
+        item_type: calculatedItem.inventory_item_id ? "Stock Item" : calculatedItem.item_type || "Special Order",
+        com_ship_to: calculatedItem.item_type === "COM Fabric" ? calculatedItem.com_ship_to || null : null,
         source_quote_item_id: calculatedItem.id || null,
         manufacturer_id: calculatedItem.manufacturer_id,
         sort_order: index,
@@ -10292,6 +10307,8 @@ export default function Home() {
       const item = validItems[index];
       const payload = {
         sales_order_id: selectedSale.id,
+        item_type: item.item_type,
+        com_ship_to: item.com_ship_to,
         source_quote_item_id: item.source_quote_item_id,
         manufacturer_id: item.manufacturer_id || null,
         sort_order: index,
@@ -11882,12 +11899,18 @@ export default function Home() {
 
     const groups = new Map<string, SalesOrderItem[]>();
 
+    const itemSourceError = sourceError(specialOrderItems);
+    if (itemSourceError) { setGeneratingPurchaseOrders(false); window.alert(itemSourceError); return; }
     specialOrderItems.forEach((item) => {
-      const manufacturerId = item.manufacturer_id as string;
-      const group = groups.get(manufacturerId) || [];
+      const key = poGroupKey(item);
+      const group = groups.get(key) || [];
       group.push(item);
-      groups.set(manufacturerId, group);
+      groups.set(key, group);
     });
+    for (const items of groups.values()) {
+      const addresses = new Set(items.filter(item => item.com_ship_to).map(item => item.com_ship_to!.address.trim()));
+      if (addresses.size > 1) { setGeneratingPurchaseOrders(false); window.alert("COM items shipping to the same manufacturer must use the same ship-to address. Update the quote before generating POs."); return; }
+    }
 
     const { data: existingData, error: existingError } =
       await supabase
@@ -11910,7 +11933,11 @@ export default function Home() {
     let updatedCount = 0;
     const lockedVendors: string[] = [];
 
-    for (const [manufacturerId, items] of groups.entries()) {
+    const freightAssigned = new Set<string>();
+    for (const items of groups.values()) {
+      const manufacturerId = items[0].manufacturer_id as string;
+      const destination = items[0].item_type === "COM Fabric" ? items[0].com_ship_to : null;
+      const destinationId = destination?.manufacturer_id || null;
       const manufacturer = manufacturers.find(
         (entry) => entry.id === manufacturerId
       );
@@ -11920,8 +11947,10 @@ export default function Home() {
       );
 
       let order = existingOrders.find(
-        (entry) => entry.manufacturer_id === manufacturerId
+        (entry) => entry.manufacturer_id === manufacturerId && (entry.com_manufacturer_id || null) === destinationId
       );
+      const freightAmount = freightAssigned.has(manufacturerId) ? 0 : numberOrZero(freightRow?.amount);
+      freightAssigned.add(manufacturerId);
 
       if (!order) {
         const firstItem = items[0];
@@ -11931,12 +11960,11 @@ export default function Home() {
             .from("purchase_orders")
             .insert({
               sales_order_id: selectedSale.id,
+              ...comPoShipping(destination),
               manufacturer_id: manufacturerId,
               status: "Draft",
               order_date: todayISO(),
-              freight_amount: numberOrZero(
-                freightRow?.amount
-              ),
+              freight_amount: freightAmount,
               notes: freightRow?.notes || null,
               created_by: profile?.id || null,
               purchasing_factor_snapshot:
@@ -11978,9 +12006,8 @@ export default function Home() {
         const { error: updateError } = await supabase
           .from("purchase_orders")
           .update({
-            freight_amount: numberOrZero(
-              freightRow?.amount
-            ),
+            ...comPoShipping(destination),
+            freight_amount: freightAmount,
             updated_at: new Date().toISOString(),
           })
           .eq("id", order.id);
@@ -18618,7 +18645,7 @@ export default function Home() {
   // Sales-role dashboards continue rendering the same workspace as before.
   const personalDashboard = (
               <SalesDashboard
-              workspaceOnly={dashboardMode === "owner" || dashboardMode === "warranty"}
+              workspaceOnly={dashboardMode === "owner" || dashboardMode === "warranty" || dashboardMode === "administrative"}
               key={session.user.id}
               userId={session.user.id}
               firstName={firstName}
@@ -21518,7 +21545,22 @@ export default function Home() {
 
 
           <div hidden={view !== "dashboard"}>
-            {dashboardMode === "warranty" ? warrantyDashboard : (dashboardMode === "sales" || dashboardMode === "owner") ? <>
+            {dashboardMode === "administrative" ? <>
+              <header className="panel-header"><div><div className="panel-eyebrow">ADMINISTRATION</div><h1>Good to see you, {firstName}.</h1><p>Your daily checklist, notes and shipping follow-through.</p></div></header>
+              {personalDashboard}
+              <section className="admin-panel">
+                <h2>Daily cash &amp; cash history</h2>
+                <button className="primary-button" onClick={() => setView("daily_cash")}>Open Daily Cash</button>
+                <h3>Cash History Journal</h3>
+                {dailyCashLoading ? <p>Loading cash history…</p> : dailyCashBatches.filter(batch => batch.status === "Posted").length === 0 ? <p>No posted batches yet.</p> : dailyCashBatches.filter(batch => batch.status === "Posted").slice(0, 10).map(batch => <button className="secondary-button" key={batch.id} onClick={() => { setView("daily_cash"); void openDailyCashBatch(batch); }}>{batch.business_date} · Open journal</button>)}
+              </section>
+              <section className="admin-panel"><h2>Overdue ship dates</h2>
+                {purchaseOrdersLoading ? <p>Loading purchase orders…</p> : (() => {
+                  const overdue = purchaseOrders.filter(po => po.estimated_ship_date && po.estimated_ship_date < todayISO() && !po.actual_ship_date && !["Received","Shipped","Closed","Cancelled","Canceled","Void"].includes(po.status)).sort((a,b) => (a.estimated_ship_date || "").localeCompare(b.estimated_ship_date || ""));
+                  return overdue.length ? overdue.map(po => <button className="secondary-button" key={po.id} onClick={() => { setView("purchase_orders"); void openPurchaseOrder(po); }}>PO #{po.po_number} · {manufacturerName(po.manufacturer_id)} · Expected {po.estimated_ship_date}</button>) : <p>No purchase orders are past their estimated ship date.</p>;
+                })()}
+              </section>
+            </> : dashboardMode === "warranty" ? warrantyDashboard : (dashboardMode === "sales" || dashboardMode === "owner") ? <>
               {dashboardMode === "owner" && <OwnerDashboard
                 firstName={firstName}
                 sales={salesOrders}
@@ -25267,37 +25309,37 @@ export default function Home() {
                           </button>
                         </div>
 
-                        <div style={{padding:"8px 0 12px"}}>
-                          <label style={{display:"grid",gap:5}}>
-                            <strong>Pull From Inventory</strong>
-                            <select
-                              value={item.inventory_item_id || ""}
-                              onChange={(e) => {
-                                const chosen = inventoryItems.find((stock) => stock.id === e.target.value);
-                                setQuoteItems((current) => current.map((line) =>
-                                  line.local_id !== item.local_id ? line : !chosen
-                                    ? {...line, inventory_item_id:null}
-                                    : {...line, inventory_item_id:chosen.id,
-                                        manufacturer_id:chosen.manufacturer_id || "",
-                                        sku:chosen.sku || "", description:chosen.description || chosen.name,
-                                        msrp_at_grade:numberOrZero(chosen.msrp),
-                                        unit_price:numberOrZero(chosen.msrp),
-                                        discount_pct:0, expected_unit_cost:numberOrZero(chosen.unit_cost),
-                                        quantity:"1"}));
-                              }}
-                            >
-                              <option value="">Special order / not from inventory</option>
-                              {inventoryItems.filter((stock) => stock.id === item.inventory_item_id ||
-                                availableToSell(stock) > 0).map((stock) => (
-                                <option key={stock.id} value={stock.id}>
-                                  {stock.sku || stock.name} • {stock.name} • {availableToSell(stock)} available
-                                </option>
-                              ))}
-                            </select>
+                        <div style={{padding:"8px 0 12px",display:"grid",gap:10}}>
+                          <label>Item type
+                            <select value={item.inventory_item_id ? "Stock Item" : item.item_type || "Special Order"} onChange={e => {
+                              const type = e.target.value as NonNullable<ItemSource["item_type"]>;
+                              setQuoteItems(current => current.map(line => line.local_id !== item.local_id ? line : { ...line, item_type:type, inventory_item_id:null, com_ship_to:null }));
+                            }}><option>Special Order</option><option>Stock Item</option><option>COM Fabric</option></select>
                           </label>
-                          {item.inventory_item_id && (
-                            <small>Inventory is allocated and deducted from available stock when this quote becomes a sales order.</small>
-                          )}
+                          {(item.inventory_item_id || item.item_type === "Stock Item") && <div>
+                            <label>Search stock<input type="search" value={stockSearches[item.local_id] || ""} placeholder="Search SKU, item name or manufacturer" onChange={e => setStockSearches(current => ({...current,[item.local_id]:e.target.value}))} /></label>
+                            {item.inventory_item_id && <p>Selected: {inventoryItems.find(stock => stock.id === item.inventory_item_id)?.name || item.description} · {item.sku}</p>}
+                            {(stockSearches[item.local_id] || "").trim() && (() => {
+                              const term = stockSearches[item.local_id].trim().toLowerCase();
+                              const matches = inventoryItems.filter(stock => availableToSell(stock) > 0 && `${stock.sku || ""} ${stock.name} ${stock.description || ""} ${manufacturerName(stock.manufacturer_id)}`.toLowerCase().includes(term));
+                              return <div style={{maxHeight:260,overflowY:"auto"}}>{matches.length ? matches.slice(0,30).map(chosen => <button type="button" className="secondary-button" key={chosen.id} onClick={() => {
+                                setQuoteItems(current => current.map(line => line.local_id !== item.local_id ? line : {...line,item_type:"Stock Item",inventory_item_id:chosen.id,manufacturer_id:chosen.manufacturer_id || "",sku:chosen.sku || "",description:chosen.description || chosen.name,image_url:chosen.image_url || "",purchasing_factor_snapshot:null,tariff_pct_snapshot:0,surcharge_pct_snapshot:0,msrp_at_grade:numberOrZero(chosen.msrp),unit_price:numberOrZero(chosen.msrp),discount_pct:0,expected_unit_cost:numberOrZero(chosen.unit_cost),quantity:"1"}));
+                                setStockSearches(current => ({...current,[item.local_id]:""}));
+                              }}>{chosen.sku || chosen.name} · {chosen.name} · {availableToSell(chosen)} available</button>) : <p>No available stock matches your search.</p>}{matches.length > 30 && <p>Showing 30 results. Refine your search to narrow the list.</p>}</div>;
+                            })()}
+                            <small>Stock is allocated when the quote becomes a sales order.</small>
+                          </div>}
+                          {item.item_type === "COM Fabric" && <div style={{display:"grid",gap:8}}>
+                            <label><input type="checkbox" checked={Boolean(item.com_ship_to)} onChange={e => setQuoteItems(current => current.map(line => line.local_id !== item.local_id ? line : {...line,com_ship_to:e.target.checked ? {manufacturer_id:"",name:"",address:""} : null}))} /> Dropship to a manufacturer</label>
+                            {item.com_ship_to && <>
+                              <label>Receiving manufacturer<select value={item.com_ship_to.manufacturer_id} onChange={e => {
+                                const destination = manufacturers.find(m => m.id === e.target.value);
+                                setQuoteItems(current => current.map(line => line.local_id !== item.local_id ? line : {...line,com_ship_to:{...line.com_ship_to!,manufacturer_id:e.target.value,name:destination?.name || ""}}));
+                              }}><option value="">Choose receiving manufacturer…</option>{manufacturers.filter(m => m.active !== false || m.id === item.com_ship_to?.manufacturer_id).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+                              <label>Manufacturer ship-to address<textarea value={item.com_ship_to.address} placeholder="Street address, city, state and ZIP" onChange={e => setQuoteItems(current => current.map(line => line.local_id !== item.local_id ? line : {...line,com_ship_to:{...line.com_ship_to!,address:e.target.value}}))} /></label>
+                              <small>The fabric supplier stays in Manufacturer below. This receiving manufacturer and address will print as Ship To on the fabric PO.</small>
+                            </>}
+                          </div>}
                         </div>
                         <div className="quote-line-grid">
                           <FormField
@@ -33377,6 +33419,11 @@ const appCss = `
 
   .panel { border-radius: 17px; padding: 18px; }
 
+  .admin-panel { background:#fff; border:1px solid #dce3e9; border-radius:16px; padding:24px; margin:20px 0; }
+  .admin-panel h2 { margin:0 0 16px; color:#173c55; }
+  .admin-panel h3 { margin-top:24px; }
+  .admin-panel .secondary-button { display:block; width:100%; text-align:left; padding:12px 14px; margin:8px 0; background:#f5f8fb; color:#173c55; border:1px solid #dce3e9; border-radius:8px; cursor:pointer; }
+  .quote-line-card .secondary-button { display:block; width:100%; text-align:left; padding:10px; margin:5px 0; background:#f5f8fb; border:1px solid #dce3e9; border-radius:7px; cursor:pointer; }
   .panel-header {
     display: flex;
     justify-content: space-between;

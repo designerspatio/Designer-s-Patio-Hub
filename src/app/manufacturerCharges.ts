@@ -9,6 +9,7 @@ type Line = {
   purchasing_factor_snapshot: number | null; expected_unit_cost: number | null;
   tariff_pct_snapshot: number; surcharge_pct_snapshot: number;
   fulfillment_method?: string;
+  item_type?: string; com_ship_to?: { manufacturer_id: string } | null;
 };
 /** Rebuild from merchandise only, keeping saved charge IDs stable for linked POs. */
 export function syncManufacturerCharges<T extends Line>(lines: T[], manufacturers: {id: string; name: string}[]): T[] {
@@ -24,7 +25,8 @@ export function syncManufacturerCharges<T extends Line>(lines: T[], manufacturer
     for (const kind of ['TARIFF', 'SURCHARGE'] as const) {
       const rate = Math.max(0, number(kind === 'TARIFF' ? item.tariff_pct_snapshot : item.surcharge_pct_snapshot));
       if (!rate) continue;
-      const key = `${item.manufacturer_id}:${item.fulfillment_method || 'Special Order'}:${kind}:${rate}`;
+      const destination = item.item_type === "COM Fabric" ? item.com_ship_to?.manufacturer_id : "";
+      const key = `${item.manufacturer_id}:${item.fulfillment_method || 'Special Order'}:${kind}:${rate}${destination ? `:COM:${destination}` : ""}`;
       const group = groups.get(key) || {template: item, kind, rate, net: 0, cost: 0};
       group.net += number(item.quantity) * number(item.unit_price);
       group.cost += number(item.quantity) * number(item.expected_unit_cost);

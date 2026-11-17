@@ -6,6 +6,7 @@ export type SalesTask = {
   priority: "normal" | "high";
   completedAt: string | null;
   createdAt: string;
+  repeat?: "none" | "weekdays";
 };
 export type CrmWorkspace = {
   version: number;
@@ -25,6 +26,11 @@ export function isDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T12:00:00Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+export function recurringTaskForDate(task: SalesTask, today: string): SalesTask {
+  if (task.repeat !== "weekdays" || !task.completedAt || localDate(new Date(task.completedAt)) >= today) return task;
+  const day = new Date(`${today}T12:00:00`).getDay();
+  return day === 0 || day === 6 ? task : { ...task, completedAt: null, dueDate: today };
 }
 export function taskGroup(task: SalesTask, today: string) {
   if (task.completedAt) return "completed";
@@ -52,10 +58,11 @@ export function parseWorkspace(value: unknown): CrmWorkspace {
     if (!t || !shortText(t.id, 80) || !t.id || ids.has(t.id) || !shortText(t.title, 240) || !t.title.trim() ||
       !shortText(t.clientId, 80) || !(t.dueDate === "" || isDate(t.dueDate)) ||
       !["normal", "high"].includes(t.priority) || !timestamp(t.createdAt) ||
-      !(t.completedAt === null || timestamp(t.completedAt))) throw new Error("Invalid task. Check its title and due date.");
+      !(t.completedAt === null || timestamp(t.completedAt)) ||
+      !(t.repeat === undefined || t.repeat === "none" || t.repeat === "weekdays")) throw new Error("Invalid task. Check its title and due date.");
     ids.add(t.id);
     return { id: t.id, title: t.title.trim(), clientId: t.clientId, dueDate: t.dueDate, priority: t.priority,
-      completedAt: t.completedAt, createdAt: t.createdAt };
+      completedAt: t.completedAt, createdAt: t.createdAt, ...(t.repeat ? { repeat: t.repeat } : {}) };
   });
   return { version: w.version, tasks, note: w.note, pinnedClientIds: [...new Set(w.pinnedClientIds)] };
 }

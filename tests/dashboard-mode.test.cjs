@@ -36,3 +36,7 @@ test('Niyah opens warranty desk and other profiles retain their dashboards',()=>
  assert.equal(dashboardModeForProfile({display_name:'Geneva',role:'Owner'}),'owner');
  assert.equal(dashboardModeForProfile({display_name:'Shawna',role:'Manager'}),'sales');
 });
+test('Andrew uses administration without affecting sales roles',()=>{
+  assert.equal(dashboardModeForProfile({display_name:'Andrew Jones',role:'Administrative'}),'administrative');
+  assert.equal(dashboardModeForProfile({display_name:'Joey',role:'Assistant Manager'}),'sales');
+});

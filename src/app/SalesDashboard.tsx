@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { dateAfter, localDate, parseWorkspace, sortTasks, taskGroup, type CrmWorkspace, type SalesTask } from "./crmWorkspace";
+import { dateAfter, localDate, parseWorkspace, recurringTaskForDate, sortTasks, taskGroup, type CrmWorkspace, type SalesTask } from "./crmWorkspace";
 import styles from "./SalesDashboard.module.css";
 
 type Contact = { id: string; name: string; email: string | null; phone: string | null; location: string };
@@ -17,7 +17,7 @@ type Props = {
   onNewClient: () => void; onNewQuote: () => void; onScan: () => void; onClients: () => void; onQuotes: () => void;
 };
 type TaskFilter = "open" | "today" | "upcoming" | "completed";
-const blankTask = () => ({ title: "", clientId: "", dueDate: localDate(), priority: "normal" as SalesTask["priority"] });
+const blankTask = () => ({ title: "", clientId: "", dueDate: localDate(), priority: "normal" as SalesTask["priority"], repeat: "none" as "none" | "weekdays" });
 function dateLabel(date: string) {
   return date ? new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "No due date";
 }
@@ -94,7 +94,7 @@ export default function SalesDashboard(props: Props) {
     finally { busy.current = false; if (mounted.current) setSaving(false); }
   }
   const contactById = useMemo(() => new Map(allClients.map(c => [c.id, c])), [allClients]);
-  const tasks = workspace?.tasks || [];
+  const tasks = (workspace?.tasks || []).map(task => recurringTaskForDate(task, today));
   const due = tasks.filter(t => !t.completedAt && t.dueDate && t.dueDate <= today);
   const upcoming = tasks.filter(t => !t.completedAt && t.dueDate > today && t.dueDate <= dateAfter(7));
   const shownTasks = sortTasks(tasks).filter(t => {
@@ -110,11 +110,11 @@ export default function SalesDashboard(props: Props) {
   const shownClients = clients.filter(c => search.trim() ? `${c.name} ${c.email || ""} ${c.location}`.toLowerCase().includes(search.trim().toLowerCase()) : pinned.includes(c.id)).slice(0, 8);
   const disabled = saving || loadingWorkspace || !workspace;
   function editTask(task: SalesTask) {
-    setEditingId(task.id); setDraft({ title: task.title, clientId: task.clientId, dueDate: task.dueDate, priority: task.priority });
+    setEditingId(task.id); setDraft({ title: task.title, clientId: task.clientId, dueDate: task.dueDate, priority: task.priority, repeat: task.repeat || "none" });
     taskInput.current?.focus();
   }
   function followUpTask(quote: Quote) {
-    setEditingId(null); setDraft({ title: `Follow up on quote #${quote.quote_number}`, clientId: quote.client_id, dueDate: today, priority: "normal" });
+    setEditingId(null); setDraft({ title: `Follow up on quote #${quote.quote_number}`, clientId: quote.client_id, dueDate: today, priority: "normal", repeat: "none" });
     taskInput.current?.focus(); taskInput.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function togglePin(id: string) {
@@ -126,7 +126,7 @@ export default function SalesDashboard(props: Props) {
     {!props.workspaceOnly && <header className={styles.welcome}>
       <div><div className={styles.eyebrow}>YOUR RELATIONSHIP DESK</div><h1>Good to see you, {props.firstName}.</h1>
         <p>A little organization. A timely follow-up. A stronger client relationship.</p></div>
-      <div className={styles.date}>{new Date(`${today}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}<span>Make room for your next great conversation.</span></div>
+      <div className={styles.date}>{new Date(new Date().toISOString()).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}<span>Make room for your next great conversation.</span></div>
     </header>}
     {!props.workspaceOnly && <><div className={styles.quickActions} aria-label="Sales shortcuts">
       <button className={styles.primary} onClick={props.onNewQuote}>＋ New quote</button>
@@ -163,6 +163,7 @@ export default function SalesDashboard(props: Props) {
           <label>Client<select disabled={disabled} value={draft.clientId} onChange={e => setDraft({ ...draft, clientId: e.target.value })}><option value="">General task</option>{allClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}{draft.clientId && !contactById.has(draft.clientId) && <option value={draft.clientId}>Client unavailable</option>}</select></label>
           <label>Due date<input type="date" disabled={disabled} value={draft.dueDate} onChange={e => setDraft({ ...draft, dueDate: e.target.value })} /></label>
           <label>Priority<select disabled={disabled} value={draft.priority} onChange={e => setDraft({ ...draft, priority: e.target.value as SalesTask["priority"] })}><option value="normal">Normal</option><option value="high">High</option></select></label>
+          <label>Repeat<select disabled={disabled} value={draft.repeat} onChange={e => setDraft({ ...draft, repeat: e.target.value as "none" | "weekdays" })}><option value="none">Does not repeat</option><option value="weekdays">Every weekday</option></select></label>
           <div className={styles.inlineActions}><button className={styles.primary} disabled={disabled || !draft.title.trim()} type="submit">{editingId ? "Update task" : "Add task"}</button>{editingId && <button type="button" onClick={() => { setEditingId(null); setDraft(blankTask()); }}>Cancel edit</button>}</div>
         </form>
         <div className={styles.tabs} role="group" aria-label="Task filters">{([ ["open", "All open"], ["today", "Due now"], ["upcoming", "Upcoming"], ["completed", "Completed"] ] as const).map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
@@ -173,7 +174,7 @@ export default function SalesDashboard(props: Props) {
               <input type="checkbox" aria-label={`Complete ${task.title}`} checked={Boolean(task.completedAt)} disabled={disabled} onChange={() => void save({ ...workspace!, tasks: tasks.map(t => t.id === task.id ? { ...t, completedAt: t.completedAt ? null : new Date().toISOString() } : t) })} />
               <div className={styles.taskCopy}><strong>{task.title}</strong><div className={styles.taskMeta}>
                 {client ? <button onClick={() => props.onClient(client.id)}>{client.name}</button> : <span>{task.clientId ? "Client unavailable" : "General task"}</span>}
-                <span className={group === "overdue" ? styles.overdue : ""}>{group === "overdue" ? "Overdue · " : ""}{dateLabel(task.dueDate)}</span>{task.priority === "high" && <span className={styles.priority}>High priority</span>}
+                <span className={group === "overdue" ? styles.overdue : ""}>{group === "overdue" ? "Overdue · " : ""}{dateLabel(task.dueDate)}</span>{task.repeat === "weekdays" && <span>Repeats every weekday</span>}{task.priority === "high" && <span className={styles.priority}>High priority</span>}
               </div></div>
               <div className={styles.rowActions}><button disabled={disabled} aria-label={`Edit ${task.title}`} onClick={() => editTask(task)}>Edit</button><button disabled={disabled} aria-label={`Delete ${task.title}`} onClick={() => { if (window.confirm(`Delete “${task.title}”?`)) { void save({ ...workspace!, tasks: tasks.filter(t => t.id !== task.id) }); if (editingId === task.id) { setEditingId(null); setDraft(blankTask()); } } }}>×</button></div>
             </div>;

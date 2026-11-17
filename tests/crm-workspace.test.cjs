@@ -96,3 +96,16 @@ test('storage failures and public bucket misconfiguration never appear as empty 
   const a=backend(); a.setFailure(); assert.equal((await a.route.GET(a.req('user-a'))).status,503);
   const b=backend(); b.setPublic(); assert.equal((await b.route.PUT(b.req('user-a',state()))).status,503); assert.equal(b.files.size,0);
 });
+test('weekday tasks reopen once per workday and skip weekends', () => {
+  const task = {...state().tasks[0], repeat:'weekdays', completedAt:'2026-11-13T18:00:00Z'};
+  assert.equal(model.recurringTaskForDate(task,'2026-11-13').completedAt,task.completedAt);
+  assert.equal(model.recurringTaskForDate(task,'2026-11-14').completedAt,task.completedAt);
+  assert.equal(model.recurringTaskForDate(task,'2026-11-15').completedAt,task.completedAt);
+  const monday = model.recurringTaskForDate(task,'2026-11-16');
+  assert.equal(monday.completedAt,null);
+  assert.equal(monday.dueDate,'2026-11-16');
+  assert.equal(monday.id,task.id);
+  assert.equal(model.parseWorkspace({...state(),tasks:[task]}).tasks[0].repeat,'weekdays');
+  assert.throws(()=>model.parseWorkspace({...state(),tasks:[{...task,repeat:'bad'}]}));
+  assert.equal(model.recurringTaskForDate({...task,repeat:'none'},'2026-11-16').completedAt,task.completedAt);
+});
