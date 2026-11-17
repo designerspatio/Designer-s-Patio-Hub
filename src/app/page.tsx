@@ -12,6 +12,7 @@ import { splitQuoteLines, splitQuoteCharges } from "./quoteSplit";
 import {canManageQuoteFinancials, productCommissionable} from "./quoteFinancialAccess";
 
 import ChangePassword from "./ChangePassword";
+import DiscountInput from "./DiscountInput";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
 import { displayOrderNotes, calculateOrderCharges, plainOrderNotes, readChargeSettings, writeChargeSettings, validateChargeSettings } from "./orderCharges";
@@ -25709,16 +25710,9 @@ export default function Home() {
                           </FormField>
 
                           <FormField label="Discount %">
-                            <input
-                              inputMode="decimal"
+                            <DiscountInput
                               value={item.discount_pct}
-                              onChange={(e) =>
-                                updateQuoteItem(
-                                  item.local_id,
-                                  "discount_pct",
-                                  numberOrZero(e.target.value)
-                                )
-                              }
+                              onChange={(value) => updateQuoteItem(item.local_id, "discount_pct", value)}
                             />
                           </FormField>
 
@@ -26580,16 +26574,9 @@ export default function Home() {
                           </FormField>
 
                           <FormField label="Discount %">
-                            <input
-                              inputMode="decimal"
+                            <DiscountInput
                               value={item.discount_pct}
-                              onChange={(e) =>
-                                updateSaleEditItem(
-                                  item.local_id,
-                                  "discount_pct",
-                                  numberOrZero(e.target.value)
-                                )
-                              }
+                              onChange={(value) => updateSaleEditItem(item.local_id, "discount_pct", value)}
                             />
                           </FormField>
 
