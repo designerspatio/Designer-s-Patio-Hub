@@ -2642,6 +2642,7 @@ export default function Home() {
     useState<DailyCashBatch[]>([]);
   const [dailyCashBatchSummaries, setDailyCashBatchSummaries] =
     useState<Record<string, { total: number; paymentCount: number }>>({});
+  const [dailyCashBatchPaymentLookup,setDailyCashBatchPaymentLookup] = useState<Record<string,Payment[]>>({});
   const [dailyCashCorrectionHistory, setDailyCashCorrectionHistory] =
     useState<Array<{id: string; correction_reason: string; corrected_at: string; corrected_by: string}>>([]);
   const [selectedDailyCashBatch, setSelectedDailyCashBatch] =
@@ -3900,6 +3901,7 @@ export default function Home() {
       setDailyCashBatches([]);
       setDailyCashPendingPayments([]);
       setDailyCashBatchSummaries({});
+      setDailyCashBatchPaymentLookup({});
       return;
     }
 
@@ -3959,6 +3961,21 @@ export default function Home() {
     const links =
       (linkResult.data || []) as DailyCashBatchPayment[];
 
+    // Read-only references for open and posted cash batches. Never change payment values.
+    const batchPaymentLookup: Record<string,Payment[]> = {};
+    const linkedIds=[...new Set(links.map(link=>link.payment_id))];
+    const linkedById=new Map<string,Payment>();
+    for(let offset=0;offset<linkedIds.length;offset+=200){
+      const {data,error}=await supabase.from("payments").select(paymentColumns)
+        .in("id",linkedIds.slice(offset,offset+200));
+      if(error){setMessage("Could not load cash payment references: "+error.message);break;}
+      for(const payment of (data||[]) as Payment[]) linkedById.set(payment.id,payment);
+    }
+    for(const link of links){
+      const payment=linkedById.get(link.payment_id);
+      if(payment)(batchPaymentLookup[link.daily_cash_batch_id] ||= []).push(payment);
+    }
+
     const summaries: Record<
       string,
       { total: number; paymentCount: number }
@@ -3985,6 +4002,7 @@ export default function Home() {
 
     setDailyCashBatches(batches);
     setDailyCashBatchSummaries(summaries);
+    setDailyCashBatchPaymentLookup(batchPaymentLookup);
     setDailyCashLoading(false);
   }, [supabase, session?.user?.id]);
 
@@ -19328,6 +19346,24 @@ export default function Home() {
                             </span>
                           </div>
 
+                          <div className="daily-cash-row-stat" style={{minWidth:220,textAlign:"left"}}>
+                            <span>CLIENTS / SALES ORDERS</span>
+                            {(dailyCashBatchPaymentLookup[batch.id] || []).length ? (
+                              <div style={{display:"grid",gap:4,marginTop:4}}>
+                                {Array.from(new Set((dailyCashBatchPaymentLookup[batch.id] || []).map(payment => {
+                                  const sale = salesOrders.find(order => order.id === payment.sales_order_id);
+                                  return sale
+                                    ? `${clientNameById(sale.client_id)} · SO #${sale.sale_number}`
+                                    : `Order unavailable (${payment.sales_order_id})`;
+                                }))).slice(0,3).map(label => (
+                                  <small key={label} style={{display:"block",fontWeight:600}}>{label}</small>
+                                ))}
+                                {new Set((dailyCashBatchPaymentLookup[batch.id] || []).map(payment => payment.sales_order_id)).size > 3 &&
+                                  <small>Additional orders in batch details</small>}
+                              </div>
+                            ) : <small style={{display:"block",marginTop:4}}>See batch details</small>}
+                          </div>
+
                           <div
                             className={`daily-cash-status ${
                               batch.status === "Posted"
@@ -21553,7 +21589,12 @@ export default function Home() {
                 <h2>Daily cash &amp; cash history</h2>
                 <button className="primary-button" onClick={() => setView("daily_cash")}>Open Daily Cash</button>
                 <h3>Cash History Journal</h3>
-                {dailyCashLoading ? <p>Loading cash history…</p> : dailyCashBatches.filter(batch => batch.status === "Posted").length === 0 ? <p>No posted batches yet.</p> : dailyCashBatches.filter(batch => batch.status === "Posted").slice(0, 10).map(batch => <button className="secondary-button" key={batch.id} onClick={() => { setView("daily_cash"); void openDailyCashBatch(batch); }}>{batch.business_date} · Open journal</button>)}
+                {dailyCashLoading ? <p>Loading cash history…</p> : dailyCashBatches.filter(batch => batch.status === "Posted").length === 0 ? <p>No posted batches yet.</p> : dailyCashBatches.filter(batch => batch.status === "Posted").slice(0, 10).map(batch => <button className="secondary-button" key={batch.id} onClick={() => { setView("daily_cash"); void openDailyCashBatch(batch); }}>{batch.business_date} · {(dailyCashBatchPaymentLookup[batch.id] || []).length
+                  ? Array.from(new Set((dailyCashBatchPaymentLookup[batch.id] || []).map(payment => {
+                      const sale = salesOrders.find(order => order.id === payment.sales_order_id);
+                      return sale ? `${clientNameById(sale.client_id)} (SO #${sale.sale_number})` : "Order unavailable";
+                    }))).slice(0,2).join(", ")
+                  : "Open journal"} · View journal</button>)}
               </section>
               <section className="admin-panel"><h2>Overdue ship dates</h2>
                 {purchaseOrdersLoading ? <p>Loading purchase orders…</p> : (() => {
@@ -29029,14 +29070,14 @@ export default function Home() {
                                 <strong>
                                   {payment.payment_method}
                                 </strong>
-                                <span>
-                                  Sale{" "}
-                                  {sale
-                                    ? `#${sale.sale_number}`
-                                    : "—"}
-                                  {payment.reference
-                                    ? ` • ${payment.reference}`
-                                    : ""}
+                                <span style={{display:"block",marginTop:3}}>
+                                  <strong>Client:</strong>{" "}
+                                  {sale ? clientNameById(sale.client_id) : "Client unavailable"}
+                                </span>
+                                <span style={{display:"block",marginTop:2}}>
+                                  <strong>Sales Order:</strong>{" "}
+                                  {sale ? `#${sale.sale_number}` : `Unavailable (${payment.sales_order_id})`}
+                                  {payment.reference ? ` • Ref: ${payment.reference}` : ""}
                                 </span>
                               </div>
 
