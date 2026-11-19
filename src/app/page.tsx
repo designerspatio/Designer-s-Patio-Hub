@@ -4811,12 +4811,15 @@ export default function Home() {
     };
   }, [sectionPurchaseOrders, purchaseOrderItemsSummary]);
 
-  const visibleCatalogs = useMemo(() => catalogs.filter(catalog =>
-    showArchivedCatalogs ? catalog.active === false : catalog.active !== false
-  ), [catalogs, showArchivedCatalogs]);
-  const visiblePriceLists = useMemo(() => priceLists.filter(priceList =>
-    showArchivedPriceLists ? priceList.active === false : priceList.active !== false
-  ), [priceLists, showArchivedPriceLists]);
+  const visibleCatalogs = useMemo(() => catalogs
+    .filter(catalog => showArchivedCatalogs ? catalog.active === false : catalog.active !== false)
+    .sort(compareLibraryManufacturers),
+  [catalogs, showArchivedCatalogs, manufacturers]);
+
+  const visiblePriceLists = useMemo(() => priceLists
+    .filter(priceList => showArchivedPriceLists ? priceList.active === false : priceList.active !== false)
+    .sort(compareLibraryManufacturers),
+  [priceLists, showArchivedPriceLists, manufacturers]);
 
   const filteredCatalogs = useMemo(() => {
     const term = catalogSearch.trim().toLowerCase();
@@ -5118,6 +5121,12 @@ export default function Home() {
     return (
       manufacturers.find((manufacturer) => manufacturer.id === id)
         ?.name || "Manufacturer"
+    );
+  }
+
+  function compareLibraryManufacturers(a: Catalog | PriceList, b: Catalog | PriceList) {
+    return manufacturerName(a.manufacturer_id).localeCompare(
+      manufacturerName(b.manufacturer_id), "en", { sensitivity: "base" }
     );
   }
 
