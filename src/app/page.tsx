@@ -18706,7 +18706,7 @@ export default function Home() {
       <div className="hub-shell">
         <aside className="sidebar">
           <div className="brand-area">
-            <div className="brand-logo">DP</div>
+            <img className="brand-logo" src="/designers-patio-monogram.png" alt="" />
 
             <div>
               <div className="brand-name">Designer’s Patio</div>
@@ -33174,15 +33174,12 @@ const appCss = `
 
   .loading-card { text-align: center; font-weight: 800; }
 
-  .login-logo, .brand-logo {
+  .login-logo {
     display: grid;
     place-items: center;
     background: linear-gradient(145deg,#153a58,#3881af);
     color: white;
     font-weight: 900;
-  }
-
-  .login-logo {
     width: 58px;
     height: 58px;
     border-radius: 18px;
@@ -33284,6 +33281,7 @@ const appCss = `
     width: 42px;
     height: 42px;
     border-radius: 13px;
+    object-fit: contain;
     flex: 0 0 auto;
   }
 
