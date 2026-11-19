@@ -13,6 +13,7 @@ import {canManageQuoteFinancials, productCommissionable} from "./quoteFinancialA
 
 import ChangePassword from "./ChangePassword";
 import DiscountInput from "./DiscountInput";
+import LibraryPdfCover from "./LibraryPdfCover";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
 import { displayOrderNotes, calculateOrderCharges, plainOrderNotes, readChargeSettings, writeChargeSettings, validateChargeSettings } from "./orderCharges";
@@ -21341,67 +21342,19 @@ export default function Home() {
                     </span>
                   </div>
                 ) : (
-                  <div className="library-list">
-                    <div className="library-list-header catalog">
-                      <span>CATALOG</span>
-                      <span>MANUFACTURER</span>
-                      <span>YEAR</span>
-                      <span>PDF</span>
-                      <span>STATUS</span>
-                      <span>UPDATED</span>
-                    </div>
-
+                  <div className="library-grid">
                     {filteredCatalogs.map((catalog) => (
                       <button
                         key={catalog.id}
-                        className="library-row catalog"
+                        type="button"
+                        className="library-card"
                         onClick={() => openCatalog(catalog)}
                       >
-                        <div className="library-row-primary">
+                        <LibraryPdfCover key={catalog.file_path} storage={supabase?.storage} bucket="catalogs" filePath={catalog.file_path} />
+                        <span className="library-card-details">
                           <strong>{catalog.title}</strong>
-                          <span>
-                            {catalog.file_name ||
-                              catalog.source_url ||
-                              "No source file yet"}
-                          </span>
-                        </div>
-                        <div>
-                          {manufacturerName(
-                            catalog.manufacturer_id
-                          )}
-                        </div>
-                        <div>
-                          {catalog.catalog_year || "—"}
-                        </div>
-                        <div>
-                          <span
-                            className={`library-file-badge ${
-                              catalog.file_path ? "yes" : "no"
-                            }`}
-                          >
-                            {catalog.file_path
-                              ? "Uploaded"
-                              : "None"}
-                          </span>
-                        </div>
-                        <div>
-                          <span
-                            className={`library-active-badge ${
-                              catalog.active !== false
-                                ? "active"
-                                : "inactive"
-                            }`}
-                          >
-                            {catalog.active !== false
-                              ? "Active"
-                              : "Archived"}
-                          </span>
-                        </div>
-                        <div>
-                          {new Date(
-                            catalog.updated_at
-                          ).toLocaleDateString()}
-                        </div>
+                          <span>{[manufacturerName(catalog.manufacturer_id), catalog.catalog_year].filter(Boolean).join(" · ")}</span>
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -21513,66 +21466,28 @@ export default function Home() {
                     </span>
                   </div>
                 ) : (
-                  <div className="library-list">
-                    <div className="library-list-header price">
-                      <span>PRICE LIST</span>
-                      <span>MANUFACTURER</span>
-                      <span>EFFECTIVE</span>
-                      <span>VERSION</span>
-                      <span>PRICING</span>
-                      <span>PDF</span>
-                    </div>
-
+                  <div className="library-grid">
                     {filteredPriceLists.map((priceList) => (
                       <button
                         key={priceList.id}
-                        className="library-row price"
-                        onClick={() =>
-                          openPriceList(priceList)
-                        }
+                        type="button"
+                        className="library-card"
+                        onClick={() => openPriceList(priceList)}
                       >
-                        <div className="library-row-primary">
+                        <LibraryPdfCover key={priceList.file_path} storage={supabase?.storage} bucket="price-lists" filePath={priceList.file_path} />
+                        <span className="library-card-details">
                           <strong>{priceList.title}</strong>
-                          <span>
-                            {priceList.active === false ? "Archived"
-                              : priceList.expiration_date ? `Expires ${priceList.expiration_date}`
-                              : "No expiration entered"}
-                          </span>
-                        </div>
-                        <div>
-                          {manufacturerName(
-                            priceList.manufacturer_id
+                          <span>{manufacturerName(priceList.manufacturer_id)}</span>
+                          {(priceList.version || priceList.effective_date) && (
+                            <span>{[priceList.version, priceList.effective_date].filter(Boolean).join(" · ")}</span>
                           )}
-                        </div>
-                        <div>
-                          {priceList.effective_date || "—"}
-                        </div>
-                        <div>
-                          {priceList.version || "—"}
-                        </div>
-                        <div>
-                          <span
-                            className={`pricing-authority-badge ${
-                              priceList.active !== false && priceList.approved_for_pricing
-                                ? "approved"
-                                : "not-approved"
-                            }`}
-                          >
-                            {priceList.active === false ? "Inactive"
+                          <span className={`pricing-authority-badge ${
+                            priceList.active !== false && priceList.approved_for_pricing ? "approved" : "not-approved"
+                          }`}>
+                            {priceList.active === false ? "Archived"
                               : priceList.approved_for_pricing ? "Approved" : "Not Approved"}
                           </span>
-                        </div>
-                        <div>
-                          <span
-                            className={`library-file-badge ${
-                              priceList.file_path ? "yes" : "no"
-                            }`}
-                          >
-                            {priceList.file_path
-                              ? "Uploaded"
-                              : "None"}
-                          </span>
-                        </div>
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -36783,77 +36698,80 @@ const appCss = `
     margin: 18px 0;
   }
 
-  .library-list {
-    overflow: hidden;
-    border-radius: 14px;
-  }
-
-  .library-list-header,
-  .library-row {
+  .library-grid {
     display: grid;
-    grid-template-columns:
-      minmax(190px,1.55fr)
-      minmax(145px,1.15fr)
-      90px
-      95px
-      100px
-      95px;
-    gap: 12px;
-    align-items: center;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 155px), 1fr));
+    gap: 14px;
+    padding: 12px;
   }
 
-  .library-list-header {
-    padding: 9px 14px;
-    background: #edf2f5;
-    color: #75858f;
-    font-size: 7px;
-    font-weight: 900;
-    letter-spacing: .04em;
-  }
-
-  .library-row {
-    width: 100%;
-    border: 0;
-    border-bottom: 1px solid #e8edf0;
-    padding: 12px 14px;
+  .library-card {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #dde7ed;
+    border-radius: 12px;
+    padding: 0;
     background: white;
     color: #526b7a;
+    overflow: hidden;
     text-align: left;
-    font-size: 8.8px;
+    cursor: pointer;
   }
 
-  .library-row:hover {
+  .library-card:hover,
+  .library-card:focus-visible {
+    border-color: #3881af;
     background: #f8fafb;
   }
 
-  .library-row:last-child {
-    border-bottom: 0;
+  .library-card-cover {
+    width: 100%;
+    height: 168px;
+    display: grid;
+    place-items: center;
+    padding: 10px;
+    box-sizing: border-box;
+    background: #edf2f5;
   }
 
-  .library-row-primary {
-    min-width: 0;
+  .library-card-cover canvas {
+    max-width: 100%;
+    max-height: 148px;
+    object-fit: contain;
+    box-shadow: 0 2px 8px #153a5833;
   }
 
-  .library-row-primary strong {
-    display: block;
-    overflow: hidden;
+  .library-card-placeholder {
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .library-card-file-icon {
+    padding: 12px 8px;
+    border: 1px solid #c0d1dc;
+    border-radius: 6px;
+    background: white;
     color: #284f67;
-    font-size: 9.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-weight: 800;
   }
 
-  .library-row-primary span {
-    display: block;
-    margin-top: 3px;
-    overflow: hidden;
-    color: #8a979f;
-    font-size: 7.8px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .library-card-details {
+    display: grid;
+    justify-items: start;
+    gap: 4px;
+    padding: 10px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
   }
 
-  .library-file-badge,
+  .library-card-details strong {
+    color: #284f67;
+    font-size: 13px;
+  }
+
   .library-active-badge,
   .pricing-authority-badge {
     display: inline-flex;
@@ -36863,13 +36781,11 @@ const appCss = `
     font-weight: 900;
   }
 
-  .library-file-badge.yes,
   .library-active-badge.active {
     background: #eaf5ee;
     color: #35664f;
   }
 
-  .library-file-badge.no,
   .library-active-badge.inactive {
     background: #f0f2f3;
     color: #7f8b92;

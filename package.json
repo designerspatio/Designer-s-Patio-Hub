@@ -9,12 +9,15 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
     "test:crm": "node tests/crm-workspace.test.cjs",
-    "test:stock": "node --test tests/stock-orders.test.cjs tests/owner-inventory.test.cjs tests/inventory-availability.test.cjs"
+    "test:stock": "node --test tests/stock-orders.test.cjs tests/owner-inventory.test.cjs tests/inventory-availability.test.cjs",
+    "predev": "node scripts/prepare-pdf-preview.cjs",
+    "prebuild": "node scripts/prepare-pdf-preview.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "html5-qrcode": "2.3.8",
     "next": "latest",
+    "pdfjs-dist": "^6.5.438",
     "qrcode.react": "4.2.0",
     "react": "latest",
     "react-dom": "latest"
