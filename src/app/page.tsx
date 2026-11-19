@@ -23,6 +23,7 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import SalesDashboard from "./SalesDashboard";
 import FinanceDashboard from "./FinanceDashboard";
 import OwnerDashboard from "./OwnerDashboard";
+import TimeClockPanel from "./TimeClockPanel";
 import WarrantyDashboard from "./WarrantyDashboard";
 import { poShippingForm, poCostDrafts, poCostUpdates, effectivePoCost } from "./purchaseOrderDetails";
 import { partitionPurchaseOrders, purchaseOrderInHistory, type PurchaseOrderSection } from "./purchaseOrderHistory";
@@ -21583,6 +21584,7 @@ export default function Home() {
 
           <div hidden={view !== "dashboard"}>
             {dashboardMode === "administrative" ? <>
+              <TimeClockPanel supabase={supabase} userId={session.user.id} />
               <header className="panel-header"><div><div className="panel-eyebrow">ADMINISTRATION</div><h1>Good to see you, {firstName}.</h1><p>Your daily checklist, notes and shipping follow-through.</p></div></header>
               {personalDashboard}
               <section className="admin-panel">
@@ -21602,7 +21604,8 @@ export default function Home() {
                   return overdue.length ? overdue.map(po => <button className="secondary-button" key={po.id} onClick={() => { setView("purchase_orders"); void openPurchaseOrder(po); }}>PO #{po.po_number} · {manufacturerName(po.manufacturer_id)} · Expected {po.estimated_ship_date}</button>) : <p>No purchase orders are past their estimated ship date.</p>;
                 })()}
               </section>
-            </> : dashboardMode === "warranty" ? warrantyDashboard : (dashboardMode === "sales" || dashboardMode === "owner") ? <>
+            </> : dashboardMode === "warranty" ? <><TimeClockPanel supabase={supabase} userId={session.user.id}/>{warrantyDashboard}</> : (dashboardMode === "sales" || dashboardMode === "owner") ? <>
+              {dashboardMode === "owner" && <TimeClockPanel supabase={supabase} userId={session.user.id} owner />}
               {dashboardMode === "owner" && <OwnerDashboard
                 firstName={firstName}
                 sales={salesOrders}
