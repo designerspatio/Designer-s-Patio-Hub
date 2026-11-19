@@ -1,0 +1,37 @@
+name: Apply timeclock corrections, owner all-employee view and PDFs
+on:
+  push:
+    branches: [feature/timeclock-improvements-pdf-20261119]
+    paths: [.github/workflows/apply-timeclock-improvements.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/timeclock-improvements-pdf-20261119
+          persist-credentials: true
+      - name: Apply tested UI changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d scripts/timeclock-ui.patch.gz.b64 | gzip -d > /tmp/timeclock-ui.patch
+          git apply --check /tmp/timeclock-ui.patch
+          git apply /tmp/timeclock-ui.patch
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck and timecard/PDF tests
+        run: |
+          npm run typecheck
+          node --test tests/time-clock.test.cjs tests/time-clock-pdf.test.cjs
+      - name: Production build
+        run: npm run build
+      - name: Commit tested changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/page.tsx src/app/TimeClockPanel.tsx src/app/TimeClockPanel.module.css
+          git commit -m "Clarify missed punch corrections and export employee weekly timecards"
+          git push origin HEAD:feature/timeclock-improvements-pdf-20261119
