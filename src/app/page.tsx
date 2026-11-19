@@ -21605,7 +21605,6 @@ export default function Home() {
                 })()}
               </section>
             </> : dashboardMode === "warranty" ? <><TimeClockPanel supabase={supabase} userId={session.user.id}/>{warrantyDashboard}</> : (dashboardMode === "sales" || dashboardMode === "owner") ? <>
-              {dashboardMode === "owner" && <TimeClockPanel supabase={supabase} userId={session.user.id} owner />}
               {dashboardMode === "owner" && <OwnerDashboard
                 firstName={firstName}
                 sales={salesOrders}
@@ -21643,6 +21642,7 @@ export default function Home() {
                 onReports={() => setView("reports")}
                 workspace={personalDashboard}
               />}
+              {dashboardMode === "owner" && <TimeClockPanel supabase={supabase} userId={session.user.id} owner />}
 {dashboardMode === "sales" && personalDashboard}</> : <FinanceDashboard
               key={session.user.id + "-" + dashboardMode}
               mode={dashboardMode}
