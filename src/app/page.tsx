@@ -7555,7 +7555,7 @@ export default function Home() {
       const useMyQuoteProfile = salesperson?.id === profile?.id;
       const salesEmail =
         (useMyQuoteProfile && hubSettings.quote_email) ||
-        salesperson?.email || "info@designerspatio.com";
+        salesperson?.email || "showroom@designerspatio.com";
       const salesPhone =
         (useMyQuoteProfile && hubSettings.quote_phone) ||
         salesperson?.phone || "214.217.9997";
@@ -7622,7 +7622,7 @@ export default function Home() {
 
     const salespersonPhone = salesperson?.phone || "214.217.9997";
     const salespersonEmail =
-      salesperson?.email || "info@designerspatio.com";
+      salesperson?.email || "showroom@designerspatio.com";
     const clientName = client ? getClientName(client) : "Unknown client";
     const clientContact = client
       ? [client.first_name, client.last_name].filter(Boolean).join(" ")
@@ -8217,7 +8217,7 @@ export default function Home() {
       const useMyQuoteProfile = salesperson?.id === profile?.id;
       const salesEmail =
         (useMyQuoteProfile && hubSettings.quote_email) ||
-        salesperson?.email || "info@designerspatio.com";
+        salesperson?.email || "showroom@designerspatio.com";
       const salesPhone =
         (useMyQuoteProfile && hubSettings.quote_phone) ||
         salesperson?.phone || "214.217.9997";
@@ -8284,7 +8284,7 @@ export default function Home() {
 
     const salespersonPhone = salesperson?.phone || "214.217.9997";
     const salespersonEmail =
-      salesperson?.email || "info@designerspatio.com";
+      salesperson?.email || "showroom@designerspatio.com";
     const clientName = client ? getClientName(client) : "Unknown client";
     const clientContact = client
       ? [client.first_name, client.last_name].filter(Boolean).join(" ")
