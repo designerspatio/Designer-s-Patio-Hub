@@ -7412,15 +7412,10 @@ export default function Home() {
     client,
     salesperson,
     logoImage,
-    productImages,
   }: {
     client: Client | undefined;
     salesperson: Profile | undefined;
     logoImage: { binary: string; width: number; height: number } | null;
-    productImages: Record<
-      string,
-      { binary: string; width: number; height: number } | null
-    >;
   }) {
     if (!selectedQuote) return new Uint8Array();
 
@@ -7445,15 +7440,6 @@ export default function Home() {
     if (logoImage) {
       images.push({ name: "LOGO", ...logoImage });
     }
-
-    const itemImageNames: Record<string, string> = {};
-    quoteItems.forEach((item, index) => {
-      const image = productImages[item.local_id];
-      if (!image) return;
-      const name = `P${index + 1}`;
-      itemImageNames[item.local_id] = name;
-      images.push({ name, ...image });
-    });
 
     const pages: string[][] = [[]];
     let pageIndex = 0;
@@ -7706,10 +7692,9 @@ export default function Home() {
 
     const col = {
       x: 32,
-      image: 50,
       item: 28,
       sku: 55,
-      description: 133,
+      description: 183,
       qty: 28,
       msrp: 60,
       discount: 45,
@@ -7717,7 +7702,6 @@ export default function Home() {
       total: 74,
     };
     const tableWidth =
-      col.image +
       col.item +
       col.sku +
       col.description +
@@ -7731,7 +7715,6 @@ export default function Home() {
       fillRect(col.x, top, tableWidth, 22, NAVY);
       let x = col.x;
       const headers: Array<[string, number]> = [
-        ["IMAGE", col.image],
         ["ITEM", col.item],
         ["SKU", col.sku],
         ["DESCRIPTION", col.description],
@@ -7771,11 +7754,12 @@ export default function Home() {
         item.grade ? `Grade: ${item.grade}` : "",
         item.additional_details || "",
       ].filter(Boolean);
-      // The first description line prints bold; measure its whole paragraph
-      // with bold metrics so every wrapped line still fits the PDF column.
-      const descLines = details.flatMap((entry, detailIndex) =>
-        wrapPdfWidth(entry, col.description - 12, 7.1, detailIndex === 0)
-      );
+      const descLines = details.flatMap((entry, detailIndex) => {
+        const bold = detailIndex === 0;
+        return wrapPdfWidth(entry, col.description - 12, 7.1, bold).map(
+          (text) => ({ text, bold })
+        );
+      });
       const skuLines = wrapPdfWidth(
         isManufacturerCharge(item) ? "Charge" : item.sku || "-",
         col.sku - 10,
@@ -7811,7 +7795,7 @@ export default function Home() {
         strokeRect(col.x, cursorTop, tableWidth, rowHeight, [0.82, 0.85, 0.87], 0.45);
         let x = col.x;
         const widths = [
-          col.image, col.item, col.sku, col.description,
+          col.item, col.sku, col.description,
           col.qty, col.msrp, col.discount, col.unit,
         ];
         widths.forEach(width => {
@@ -7819,17 +7803,7 @@ export default function Home() {
           lineAt(x, cursorTop, x, cursorTop + rowHeight, 0.35, [0.84, 0.87, 0.89]);
         });
 
-        const imageName = itemImageNames[item.local_id];
-        if (lineOffset === 0) {
-          if (imageName) {
-            drawImage(imageName, col.x + 5, cursorTop + 5, col.image - 10, rowHeight - 10);
-          } else {
-            fillRect(col.x + 6, cursorTop + 7, col.image - 12, rowHeight - 14, [0.96, 0.97, 0.98]);
-            textAt(col.x + 13, cursorTop + rowHeight / 2 - 3, "IMAGE", 5.8, true, MID);
-          }
-        }
-
-        let cx = col.x + col.image;
+        let cx = col.x;
         if (lineOffset === 0) {
           const itemNumber = String(index + 1);
           const size = fitPdfSize(itemNumber, col.item - 8, 8, true);
@@ -7845,7 +7819,7 @@ export default function Home() {
         cx += col.sku;
 
         descLines.slice(lineOffset, lineOffset + linesHere).forEach((entry, i) => {
-          textAt(cx + 6, cursorTop + 8 + i * 9, entry, 7.1, lineOffset + i === 0, DARK);
+          textAt(cx + 6, cursorTop + 8 + i * 9, entry.text, 7.1, entry.bold, DARK);
         });
         cx += col.description;
 
@@ -8042,15 +8016,10 @@ export default function Home() {
     client,
     salesperson,
     logoImage,
-    productImages,
   }: {
     client: Client | undefined;
     salesperson: Profile | undefined;
     logoImage: { binary: string; width: number; height: number } | null;
-    productImages: Record<
-      string,
-      { binary: string; width: number; height: number } | null
-    >;
   }) {
     if (!selectedSale) return new Uint8Array();
 
@@ -8107,15 +8076,6 @@ export default function Home() {
     if (logoImage) {
       images.push({ name: "LOGO", ...logoImage });
     }
-
-    const itemImageNames: Record<string, string> = {};
-    saleItems.forEach((item, index) => {
-      const image = productImages[item.id];
-      if (!image) return;
-      const name = `P${index + 1}`;
-      itemImageNames[item.id] = name;
-      images.push({ name, ...image });
-    });
 
     const pages: string[][] = [[]];
     let pageIndex = 0;
@@ -8366,22 +8326,20 @@ export default function Home() {
 
     const col = {
       x: 32,
-      image: 62,
       item: 34,
       sku: 64,
-      description: 201,
+      description: 263,
       qty: 40,
       unit: 73,
       total: 74,
     };
     const tableWidth =
-      col.image + col.item + col.sku + col.description + col.qty + col.unit + col.total;
+      col.item + col.sku + col.description + col.qty + col.unit + col.total;
 
     const drawTableHeader = (top: number) => {
       fillRect(col.x, top, tableWidth, 22, NAVY);
       let x = col.x;
       const headers: Array<[string, number]> = [
-        ["IMAGE", col.image],
         ["ITEM", col.item],
         ["SKU", col.sku],
         ["DESCRIPTION", col.description],
@@ -8419,9 +8377,12 @@ export default function Home() {
         item.grade ? `Grade: ${item.grade}` : "",
         item.additional_details || "",
       ].filter(Boolean);
-      const descLines = details.flatMap((entry, detailIndex) =>
-        wrapPdfWidth(entry, col.description - 12, 7.1, detailIndex === 0)
-      );
+      const descLines = details.flatMap((entry, detailIndex) => {
+        const bold = detailIndex === 0;
+        return wrapPdfWidth(entry, col.description - 12, 7.1, bold).map(
+          (text) => ({ text, bold })
+        );
+      });
       const skuLines = wrapPdfWidth(
         isManufacturerCharge(item) ? "Charge" : item.sku || "-",
         col.sku - 10,
@@ -8455,24 +8416,14 @@ export default function Home() {
         strokeRect(col.x, cursorTop, tableWidth, rowHeight, [0.82, 0.85, 0.87], 0.45);
         let x = col.x;
         const widths = [
-          col.image, col.item, col.sku, col.description, col.qty, col.unit,
+          col.item, col.sku, col.description, col.qty, col.unit,
         ];
         widths.forEach(width => {
           x += width;
           lineAt(x, cursorTop, x, cursorTop + rowHeight, 0.35, [0.84, 0.87, 0.89]);
         });
 
-        const imageName = itemImageNames[item.id];
-        if (lineOffset === 0) {
-          if (imageName) {
-            drawImage(imageName, col.x + 5, cursorTop + 5, col.image - 10, rowHeight - 10);
-          } else {
-            fillRect(col.x + 6, cursorTop + 7, col.image - 12, rowHeight - 14, [0.96, 0.97, 0.98]);
-            textAt(col.x + 13, cursorTop + rowHeight / 2 - 3, "IMAGE", 5.8, true, MID);
-          }
-        }
-
-        let cx = col.x + col.image;
+        let cx = col.x;
         if (lineOffset === 0) {
           const itemNumber = String(index + 1);
           const size = fitPdfSize(itemNumber, col.item - 8, 8, true);
@@ -8488,7 +8439,7 @@ export default function Home() {
         cx += col.sku;
 
         descLines.slice(lineOffset, lineOffset + linesHere).forEach((entry, i) => {
-          textAt(cx + 6, cursorTop + 8 + i * 9, entry, 7.1, lineOffset + i === 0, DARK);
+          textAt(cx + 6, cursorTop + 8 + i * 9, entry.text, 7.1, entry.bold, DARK);
         });
         cx += col.description;
 
@@ -8691,19 +8642,10 @@ export default function Home() {
       (entry) => entry.id === quoteForm.salesperson_user_id
     );
 
-    const productImageEntries = await Promise.all(
-      quoteItems.map(async (item) => [
-        item.local_id,
-        item.image_url ? await imageUrlToPdfJpeg(item.image_url) : null,
-      ] as const)
-    );
-    const productImages = Object.fromEntries(productImageEntries);
-
     const bytes = buildBrandedQuotePdf({
       client,
       salesperson,
       logoImage,
-      productImages,
     });
     const blob = new Blob([bytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
@@ -8732,19 +8674,10 @@ export default function Home() {
       (entry) => entry.id === selectedSale.salesperson_user_id
     );
 
-    const productImageEntries = await Promise.all(
-      saleItems.map(async (item) => [
-        item.id,
-        item.image_url ? await imageUrlToPdfJpeg(item.image_url) : null,
-      ] as const)
-    );
-    const productImages = Object.fromEntries(productImageEntries);
-
     const bytes = buildBrandedSalesOrderPdf({
       client,
       salesperson,
       logoImage,
-      productImages,
     });
     const blob = new Blob([bytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
