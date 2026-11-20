@@ -2029,6 +2029,15 @@ function getClientName(client: Client) {
   return personalName || "Unnamed client";
 }
 
+function clientPdfFilename(documentName: string, client: Client | undefined) {
+  const name = (client ? getClientName(client) : "")
+    .replace(/[<>:"/\\|?*\p{Cc}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const safeName = Array.from(name).slice(0, 80).join("").replace(/[. ]+$/, "");
+  return `${documentName} - ${safeName || "Unknown client"}.pdf`;
+}
+
 function getLocation(client: Client) {
   const cityState = [client.city, client.state]
     .filter(Boolean)
@@ -8651,7 +8660,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `Designers-Patio-Quote-${selectedQuote.quote_number}.pdf`;
+    link.download = clientPdfFilename(`Designers-Patio-Quote-${selectedQuote.quote_number}`, client);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -8683,7 +8692,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `Designers-Patio-Sales-Order-${selectedSale.sale_number}.pdf`;
+    link.download = clientPdfFilename(`Designers-Patio-Sales-Order-${selectedSale.sale_number}`, client);
     document.body.appendChild(link);
     link.click();
     link.remove();
