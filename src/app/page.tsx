@@ -8335,15 +8335,24 @@ export default function Home() {
 
     const col = {
       x: 32,
-      item: 34,
-      sku: 64,
-      description: 263,
-      qty: 40,
-      unit: 73,
+      item: 28,
+      sku: 55,
+      description: 183,
+      qty: 28,
+      msrp: 60,
+      discount: 45,
+      unit: 75,
       total: 74,
     };
     const tableWidth =
-      col.item + col.sku + col.description + col.qty + col.unit + col.total;
+      col.item +
+      col.sku +
+      col.description +
+      col.qty +
+      col.msrp +
+      col.discount +
+      col.unit +
+      col.total;
 
     const drawTableHeader = (top: number) => {
       fillRect(col.x, top, tableWidth, 22, NAVY);
@@ -8353,7 +8362,9 @@ export default function Home() {
         ["SKU", col.sku],
         ["DESCRIPTION", col.description],
         ["QTY", col.qty],
-        ["UNIT PRICE", col.unit],
+        ["MSRP", col.msrp],
+        ["DISC.", col.discount],
+        ["NET UNIT", col.unit],
         ["TOTAL", col.total],
       ];
 
@@ -8425,7 +8436,8 @@ export default function Home() {
         strokeRect(col.x, cursorTop, tableWidth, rowHeight, [0.82, 0.85, 0.87], 0.45);
         let x = col.x;
         const widths = [
-          col.item, col.sku, col.description, col.qty, col.unit,
+          col.item, col.sku, col.description,
+          col.qty, col.msrp, col.discount, col.unit,
         ];
         widths.forEach(width => {
           x += width;
@@ -8458,6 +8470,18 @@ export default function Home() {
           textAt(cx + (col.qty - pdfTextWidth(qtyLabel, qtySize, true)) / 2, cursorTop + 20, qtyLabel, qtySize, true, DARK);
         }
         cx += col.qty;
+        if (lineOffset === 0) {
+          const msrpLabel = money(numberOrZero(item.msrp_at_grade));
+          textAt(cx + col.msrp - 7, cursorTop + 20, msrpLabel,
+            fitPdfSize(msrpLabel, col.msrp - 12, 6.8), false, DARK, "right");
+        }
+        cx += col.msrp;
+        if (lineOffset === 0) {
+          const discountLabel = `${numberOrZero(item.discount_pct).toFixed(1)}%`;
+          textAt(cx + col.discount - 7, cursorTop + 20, discountLabel,
+            fitPdfSize(discountLabel, col.discount - 12, 6.8), false, DARK, "right");
+        }
+        cx += col.discount;
         if (lineOffset === 0) {
           const unitLabel = money(numberOrZero(item.unit_price));
           textAt(cx + col.unit - 7, cursorTop + 20, unitLabel,
