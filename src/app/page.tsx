@@ -12,7 +12,7 @@ import { splitQuoteLines, splitQuoteCharges } from "./quoteSplit";
 import {canManageQuoteFinancials, productCommissionable} from "./quoteFinancialAccess";
 
 import ChangePassword from "./ChangePassword";
-import DiscountInput from "./DiscountInput";
+import DecimalInput from "./DecimalInput";
 import LibraryPdfCover from "./LibraryPdfCover";
 import OrderChargesEditor from "./OrderChargesEditor";
 import { isManufacturerCharge, syncManufacturerCharges } from "./manufacturerCharges";
@@ -25627,24 +25627,15 @@ export default function Home() {
                           </FormField>
 
                           <FormField label="MSRP @ Grade">
-                            <input
-                              inputMode="decimal"
-                              value={
-                                item.msrp_at_grade || ""
-                              }
-                              onChange={(e) =>
-                                updateQuoteItem(
-                                  item.local_id,
-                                  "msrp_at_grade",
-                                  numberOrZero(e.target.value)
-                                )
-                              }
+                            <DecimalInput
+                              value={item.msrp_at_grade}
+                              onChange={(value) => updateQuoteItem(item.local_id, "msrp_at_grade", value)}
                               placeholder="0.00"
                             />
                           </FormField>
 
                           <FormField label="Discount %">
-                            <DiscountInput
+                            <DecimalInput
                               value={item.discount_pct}
                               onChange={(value) => updateQuoteItem(item.local_id, "discount_pct", value)}
                             />
@@ -26494,21 +26485,15 @@ export default function Home() {
                           </FormField>
 
                           <FormField label="MSRP @ Grade">
-                            <input
-                              inputMode="decimal"
-                              value={item.msrp_at_grade || ""}
-                              onChange={(e) =>
-                                updateSaleEditItem(
-                                  item.local_id,
-                                  "msrp_at_grade",
-                                  numberOrZero(e.target.value)
-                                )
-                              }
+                            <DecimalInput
+                              value={item.msrp_at_grade}
+                              onChange={(value) => updateSaleEditItem(item.local_id, "msrp_at_grade", value)}
+                              placeholder="0.00"
                             />
                           </FormField>
 
                           <FormField label="Discount %">
-                            <DiscountInput
+                            <DecimalInput
                               value={item.discount_pct}
                               onChange={(value) => updateSaleEditItem(item.local_id, "discount_pct", value)}
                             />
