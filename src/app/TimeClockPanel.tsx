@@ -1,7 +1,7 @@
 "use client";
 import {useCallback,useEffect,useMemo,useState} from "react";
 import type {SupabaseClient} from "@supabase/supabase-js";
-import {CLOCK_EMPLOYEES,GENEVA_ID,CLOCK_TZ,sundayOf,chicagoDay,addDays,weekBounds,workedHours,formatHours,formatPunch,chicagoInput,chicagoToIso,type ClockSegment,type ClockAdjustment} from "./timeClock";
+import {CLOCK_EMPLOYEES,GENEVA_ID,CLOCK_TZ,sundayOf,chicagoDay,addDays,weekBounds,workedHours,formatHours,formatPunch,chicagoInput,chicagoToIso,correctionTime,type ClockSegment,type ClockAdjustment} from "./timeClock";
 import styles from "./TimeClockPanel.module.css";
 import {exportTimecardPdf} from "./timeClockPdf";
 type Props={supabase:SupabaseClient|null;userId:string;owner?:boolean};
@@ -100,7 +100,9 @@ export default function TimeClockPanel({supabase,userId,owner=false}:Props){
  async function saveCorrection(action:"add"|"edit"|"remove"){
   if(!supabase||!isOwner||!correction||busy)return;
   if(correction.reason.trim().length<3){setError("A correction reason is required.");return;}
-  const startAt=chicagoToIso(correction.start),endAt=correction.end?chicagoToIso(correction.end):null;
+  const original=rows.find(row=>row.id===correction.id);
+  const startAt=correctionTime(correction.start,original?.started_at);
+  const endAt=correctionTime(correction.end,original?.ended_at);
   if(action!=="remove"&&(!startAt||(correction.end&&!endAt))){setError("Enter valid clock times.");return;}
   if(action==="remove"&&!window.confirm("Remove this entry? It will remain documented in the correction history."))return;
   setBusy(true);setError("");setNotice("");
