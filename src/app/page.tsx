@@ -2882,7 +2882,10 @@ export default function Home() {
   const [scanStatus, setScanStatus] = useState("");
   const [scannerActive, setScannerActive] = useState(false);
   const scannerInputRef = useRef<HTMLTextAreaElement>(null);
-  const badgeCameraRef = useRef<{ cancelled: boolean; close?: () => Promise<void> } | null>(null);
+  const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerStreamRef = useRef<MediaStream | null>(null);
+  const scannerTimerRef = useRef<number | null>(null);
+  const scannerRequestRef = useRef(0);
   const [hubSettings, setHubSettings] =
     useState<HubSettings>(blankHubSettings);
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -18418,68 +18421,80 @@ export default function Home() {
   }
 
   function stopBadgeScanner() {
-    const camera = badgeCameraRef.current;
-    if (!camera || camera.cancelled) return;
-    camera.cancelled = true;
-    if (camera.close) void camera.close();
+    scannerRequestRef.current++;
+    if (scannerTimerRef.current != null) {
+      window.clearTimeout(scannerTimerRef.current);
+      scannerTimerRef.current = null;
+    }
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+    scannerStreamRef.current = null;
+    if (scannerVideoRef.current) scannerVideoRef.current.srcObject = null;
+    setScannerActive(false);
   }
 
   async function startBadgeScanner() {
-    if (badgeCameraRef.current) return;
+    const request = ++scannerRequestRef.current;
     setScanStatus("");
-    const camera: NonNullable<typeof badgeCameraRef.current> = { cancelled: false };
-    badgeCameraRef.current = camera;
-    setScannerActive(true);
+    const BarcodeDetectorClass = (
+      window as unknown as {
+        BarcodeDetector?: new (options: { formats: string[] }) => {
+          detect(source: CanvasImageSource): Promise<Array<{ rawValue: string }>>;
+        };
+      }
+    ).BarcodeDetector;
 
-    const resetCamera = () => {
-      if (badgeCameraRef.current !== camera) return;
-      badgeCameraRef.current = null;
-      setScannerActive(false);
-    };
+    if (!BarcodeDetectorClass || !navigator.mediaDevices?.getUserMedia) {
+      setScanStatus(
+        "Live camera scanning is not supported in this browser. Use the scanner keyboard or paste the badge value below."
+      );
+      return;
+    }
 
     try {
-      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
-      if (camera.cancelled) {
-        resetCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      if (request !== scannerRequestRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      const scanner = new Html5Qrcode("dmc-badge-camera", {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-        useBarCodeDetectorIfSupported: false,
-        verbose: false,
+      scannerStreamRef.current = stream;
+      setScannerActive(true);
+
+      const video = scannerVideoRef.current;
+      if (!video) throw new Error("Scanner video is unavailable.");
+      video.srcObject = stream;
+      await video.play();
+
+      const detector = new BarcodeDetectorClass({
+        formats: ["qr_code"],
       });
 
-      try {
-        await scanner.start(
-          { facingMode: { ideal: "environment" } },
-          { fps: 10 },
-          (value) => {
-            if (!camera.cancelled) processBadgeValue(value);
-          },
-          () => {}
-        );
-      } catch (error) {
-        scanner.clear();
-        throw error;
-      }
-
-      camera.close = async () => {
+      const detect = async () => {
+        if (scannerStreamRef.current !== stream || !scannerVideoRef.current) return;
         try {
-          await scanner.stop();
-        } catch (error) {
-          console.warn("Could not stop the DMC badge camera cleanly.", error);
-        } finally {
-          resetCamera();
+          const codes = await detector.detect(scannerVideoRef.current);
+          if (scannerStreamRef.current !== stream) return;
+          const badge = codes.find(({rawValue}) => rawValue.split("^").length >= 4);
+          if (badge) processBadgeValue(badge.rawValue);
+        } catch {
+          // Keep scanning; a frame without a readable code is normal.
+        }
+        if (scannerStreamRef.current === stream) {
+          scannerTimerRef.current = window.setTimeout(detect, 150);
         }
       };
-      if (camera.cancelled) await camera.close();
+
+      await detect();
     } catch (error) {
-      resetCamera();
-      if (!camera.cancelled) {
-        setScanStatus(
-          `Camera could not start. Check camera permissions or use the handheld scanner. ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
+      if (request !== scannerRequestRef.current) return;
+      stopBadgeScanner();
+      setScanStatus(
+        error instanceof Error
+          ? `Camera could not start: ${error.message}`
+          : "Camera could not start."
+      );
     }
   }
 
@@ -21580,7 +21595,7 @@ export default function Home() {
                   <div className="panel-eyebrow">CAMERA</div>
                   <h2>{scannerActive ? "Point at the badge QR" : "Ready to scan"}</h2>
                   <div className={`scanner-video-shell ${scannerActive ? "active" : ""}`}>
-                    <div id="dmc-badge-camera" hidden={!scannerActive} style={{ width: "100%" }} />
+                    <video ref={scannerVideoRef} muted playsInline />
                     {!scannerActive && <div className="scanner-placeholder">▣</div>}
                   </div>
                   <div className="scanner-actions">
