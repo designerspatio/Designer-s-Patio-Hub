@@ -40708,8 +40708,14 @@ const appCss = `
     background: linear-gradient(145deg,#edf4f8,#f9fbfc);
   }
 
-  .scanner-video-shell.active { border-style: solid; border-color: #285d7d; }
-  .scanner-video-shell video { width: 100%; max-height: 360px; object-fit: contain; }
+  .scanner-video-shell.active {
+    display: block;
+    min-height: 0;
+    border-style: solid;
+    border-color: #285d7d;
+  }
+  .scanner-video-shell video { display: block; width: 100%; height: auto; }
+  .scanner-video-shell:not(.active) video { display: none; }
   .scanner-placeholder { color: #285d7d; font-size: 64px; opacity: .45; }
   .scanner-actions { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
   .scanner-help { margin: 14px 0 0; color: #718692; font-size: 12px; line-height: 1.5; }
