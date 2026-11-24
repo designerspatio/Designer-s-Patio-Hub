@@ -2470,7 +2470,12 @@ export default function Home() {
     useState<SalesOrderEditForm | null>(null);
   const [rawSaleEditItems, setSaleEditItems] =
     useState<SalesOrderItemDraft[]>([]);
-  const saleEditItems = useMemo(() => syncManufacturerCharges(rawSaleEditItems, manufacturers), [rawSaleEditItems, manufacturers]);
+  const pendingSaleItemFocus = useRef<string | null>(null);
+  const saleEditItems = useMemo(() => syncManufacturerCharges(rawSaleEditItems.map((item) =>
+    !isManufacturerCharge(item) && item.fulfillment_method === "Inventory"
+      ? { ...item, tariff_pct_snapshot: 0, surcharge_pct_snapshot: 0 }
+      : item
+  ), manufacturers), [rawSaleEditItems, manufacturers]);
   const [savingSale, setSavingSale] = useState(false);
   const [saleInventorySearches, setSaleInventorySearches] =
     useState<Record<string, string>>({});
@@ -9875,8 +9880,11 @@ export default function Home() {
             numberOrZero(
               inventoryItem.unit_cost
             ),
-          purchasing_factor_snapshot:
-            existing.purchasing_factor_snapshot,
+          item_type: "Stock Item",
+          com_ship_to: null,
+          purchasing_factor_snapshot: null,
+          tariff_pct_snapshot: 0,
+          surcharge_pct_snapshot: 0,
         };
       })
     );
@@ -9924,10 +9932,10 @@ export default function Home() {
   }
 
   function addSaleEditItem() {
-    setSaleEditItems((current) => [
-      ...current,
-      blankSaleItem(current.length),
-    ]);
+    const item = blankSaleItem();
+    pendingSaleItemFocus.current = item.local_id;
+    setMessage("");
+    setSaleEditItems((current) => [...current, { ...item, sort_order: current.length }]);
   }
 
   function removeSaleEditItem(localId: string) {
@@ -9967,6 +9975,21 @@ export default function Home() {
                 ? existing.inventory_item_id
                 : "",
           };
+
+          if (fulfillmentMethod === "Inventory") {
+            next.item_type = "Stock Item";
+            next.com_ship_to = null;
+            next.purchasing_factor_snapshot = null;
+            next.tariff_pct_snapshot = 0;
+            next.surcharge_pct_snapshot = 0;
+          } else if (existing.fulfillment_method === "Inventory") {
+            next.item_type = "Special Order";
+            const manufacturer = manufacturers.find((entry) => entry.id === next.manufacturer_id);
+            next.purchasing_factor_snapshot = manufacturer?.purchasing_factor ?? null;
+            next.tariff_pct_snapshot = numberOrZero(manufacturer?.tariff_pct);
+            next.surcharge_pct_snapshot = numberOrZero(manufacturer?.surcharge_pct);
+            return calculateSaleItem(next, manufacturer);
+          }
 
           if (
             fulfillmentMethod === "Inventory" &&
@@ -10012,6 +10035,15 @@ export default function Home() {
             ),
           };
 
+          if (next.fulfillment_method === "Inventory") {
+            return {
+              ...calculateSaleItem(next, manufacturer),
+              purchasing_factor_snapshot: null,
+              tariff_pct_snapshot: 0,
+              surcharge_pct_snapshot: 0,
+              expected_unit_cost: inventoryItemById(next.inventory_item_id)?.unit_cost ?? null,
+            };
+          }
           return calculateSaleItem(next, manufacturer);
         }
 
@@ -10041,6 +10073,9 @@ export default function Home() {
 
             return {
               ...calculated,
+              purchasing_factor_snapshot: null,
+              tariff_pct_snapshot: 0,
+              surcharge_pct_snapshot: 0,
               expected_unit_cost:
                 inventoryItem
                   ? numberOrZero(
@@ -10303,7 +10338,7 @@ export default function Home() {
       const item = validItems[index];
       const payload = {
         sales_order_id: selectedSale.id,
-        item_type: item.item_type,
+        item_type: item.fulfillment_method === "Inventory" ? "Stock Item" : item.item_type || "Special Order",
         com_ship_to: item.com_ship_to,
         source_quote_item_id: item.source_quote_item_id,
         manufacturer_id: item.manufacturer_id || null,
@@ -10353,9 +10388,11 @@ export default function Home() {
           return;
         }
       } else {
-        const { error: itemError } = await supabase
+        const { data: addedItem, error: itemError } = await supabase
           .from("sales_order_items")
-          .insert(payload);
+          .insert(payload)
+          .select(salesOrderItemColumns)
+          .single();
 
         if (itemError) {
           setMessage(
@@ -10364,6 +10401,15 @@ export default function Home() {
           setSavingSale(false);
           return;
         }
+        // Another step may fail after this insert. Keep the saved ID for retries.
+        const savedItem = addedItem as SalesOrderItem;
+        setSaleItems((current) => [...current, savedItem]);
+        setSaleEditItems((current) => {
+          const existing = current.some((line) => line.local_id === item.local_id);
+          return existing
+            ? current.map((line) => line.local_id === item.local_id ? { ...line, id: savedItem.id } : line)
+            : [...current, { ...item, id: savedItem.id }];
+        });
       }
     }
 
@@ -26181,7 +26227,9 @@ export default function Home() {
                   </div>
                   <button
                     className="new-client-button"
+                    type="button"
                     onClick={addSaleEditItem}
+                    disabled={savingSale}
                   >
                     + Add Item
                   </button>
@@ -26223,6 +26271,12 @@ export default function Home() {
                         <div className="form-grid">
                           <FormField label="Manufacturer" wide>
                             <select
+                              ref={(field) => {
+                                if (!field || pendingSaleItemFocus.current !== item.local_id) return;
+                                pendingSaleItemFocus.current = null;
+                                field.focus({ preventScroll: true });
+                                field.scrollIntoView({ block: "center" });
+                              }}
                               value={item.manufacturer_id}
                               onChange={(e) =>
                                 updateSaleEditItem(
@@ -26595,6 +26649,7 @@ export default function Home() {
                   })}
                 </div>
 
+                {message && <p role="alert">{message}</p>}
                 <div className="modal-actions sale-edit-actions">
                   <button
                     className="modal-primary"
