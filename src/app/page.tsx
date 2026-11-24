@@ -7177,7 +7177,7 @@ export default function Home() {
     field: keyof QuoteItem,
     value: string | number | boolean | null
   ) {
-    if (field === "commissionable" && !canManageQuoteFinancials(profile)) return;
+    if (field === "commissionable" && !canManageQuoteFinancials(profile, session?.user?.id)) return;
     setQuoteItems((current) =>
       current.map((existing) => {
         if (existing.local_id !== localId) return existing;
@@ -9941,7 +9941,7 @@ export default function Home() {
     field: keyof SalesOrderItemDraft,
     value: string | number | boolean | null
   ) {
-    if (field === "commissionable" && !canManageQuoteFinancials(profile)) return;
+    if (field === "commissionable" && !canManageQuoteFinancials(profile, session?.user?.id)) return;
     setSaleEditItems((current) =>
       current.map((existing) => {
         if (existing.local_id !== localId) return existing;
@@ -18633,7 +18633,7 @@ export default function Home() {
     session.user.email ||
     "there";
 
-  const canEditQuoteFinancials = canManageQuoteFinancials(profile);
+  const canEditQuoteFinancials = canManageQuoteFinancials(profile, session?.user?.id);
   const dashboardMode = dashboardModeForProfile(profile);
   const canManageStockOrders = ["Owner","Manager","Assistant Manager","Shipping / Accounting"].includes(profile?.role||"");
 
@@ -25153,8 +25153,8 @@ export default function Home() {
                       Line Items
                     </div>
                     <p>
-                      Manufacturer settings automatically seed the
-                      customer discount and expected cost snapshots.
+                      Manufacturer settings automatically fill in the
+                      customer discount.
                     </p>
                   </div>
 
@@ -25221,10 +25221,6 @@ export default function Home() {
                     const extended =
                       numberOrZero(item.quantity) *
                       numberOrZero(item.unit_price);
-                    const expectedExtended =
-                      numberOrZero(item.quantity) *
-                      numberOrZero(item.expected_unit_cost);
-
                     return (
                       <article
                         className="quote-line-card"

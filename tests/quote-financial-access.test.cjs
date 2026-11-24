@@ -4,8 +4,11 @@ const source=['manufacturerCharges','quoteFinancialAccess'].map(n=>stripTypeScri
 const ctx={module:{exports:{}}};vm.runInNewContext(source+'\nmodule.exports={canManageQuoteFinancials,productCommissionable,GENEVA_ACCOUNT_ID};',ctx);
 const {canManageQuoteFinancials:allowed,productCommissionable:commission,GENEVA_ACCOUNT_ID:id}=ctx.module.exports;
 test('only Geneva active owner account gets cost and commission controls',()=>{
- assert.equal(allowed({id,role:'Owner',active:true}),true);
- for(const profile of [null,{}, {id:'joey',role:'Assistant Manager'},{id:'other',role:'Owner'},{id,role:'Owner',active:false},{id,role:'Sales'}])assert.equal(allowed(profile),false);
+ const geneva={id,role:'Owner',active:true};
+ assert.equal(allowed(geneva,id),true);
+ assert.equal(allowed(geneva,'joey'),false);
+ assert.equal(allowed(geneva),false);
+ for(const profile of [null,{}, {id:'joey',role:'Assistant Manager'},{id:'other',role:'Owner'},{id,role:'Owner',active:false},{id,role:'Sales'}])assert.equal(allowed(profile,id),false);
 });
 test('stock and special order products default to commission; owner exclusions survive',()=>{
  for(const fulfillment_method of ['Inventory','Special Order']) {
@@ -18,8 +21,9 @@ test('automatic tariffs and surcharges never earn commission even on legacy flag
 });
 test('quote cost summary and both commission editors are guarded',()=>{
  const page=fs.readFileSync('src/app/page.tsx','utf8');
+ assert.match(page,/const canEditQuoteFinancials = canManageQuoteFinancials\(profile, session\?\.user\?\.id\)/);
  assert.match(page,/canEditQuoteFinancials && <div className="internal-cost-summary"/);
  assert.equal((page.match(/canEditQuoteFinancials && <label className="commission-toggle"/g)||[]).length,2);
- assert.equal((page.match(/field === "commissionable" && !canManageQuoteFinancials\(profile\)/g)||[]).length,2);
+ assert.equal((page.match(/field === "commissionable" && !canManageQuoteFinancials\(profile, session\?\.user\?\.id\)/g)||[]).length,2);
  assert.match(page,/const commissionable = items.reduce\([\s\S]*?productCommissionable\(item\)/);
 });
