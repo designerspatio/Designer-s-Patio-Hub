@@ -18443,7 +18443,7 @@ export default function Home() {
       }
     ).BarcodeDetector;
 
-    if (!BarcodeDetectorClass || !navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia) {
       setScanStatus(
         "Live camera scanning is not supported in this browser. Use the scanner keyboard or paste the badge value below."
       );
@@ -18467,20 +18467,52 @@ export default function Home() {
       video.srcObject = stream;
       await video.play();
 
-      const detector = new BarcodeDetectorClass({
-        formats: ["qr_code"],
-      });
+      let detector: InstanceType<NonNullable<typeof BarcodeDetectorClass>> | undefined;
+      try {
+        detector = BarcodeDetectorClass && new BarcodeDetectorClass({ formats: ["qr_code"] });
+      } catch {
+        // Some browsers expose BarcodeDetector without supporting QR codes.
+      }
+
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      const fallback = import("jsqr").then(({ default: decode }) => decode).catch(() => null);
+      const isBadge = (value: string) => value.split("^").length >= 4;
 
       const detect = async () => {
-        if (scannerStreamRef.current !== stream || !scannerVideoRef.current) return;
-        try {
-          const codes = await detector.detect(scannerVideoRef.current);
-          if (scannerStreamRef.current !== stream) return;
-          const badge = codes.find(({rawValue}) => rawValue.split("^").length >= 4);
-          if (badge) processBadgeValue(badge.rawValue);
-        } catch {
-          // Keep scanning; a frame without a readable code is normal.
+        if (scannerStreamRef.current !== stream) return;
+        let badge: string | undefined;
+        if (detector) {
+          try {
+            const codes = await detector.detect(video);
+            badge = codes.find(({ rawValue }) => isBadge(rawValue))?.rawValue;
+          } catch {
+            // Try the pixel decoder if the browser could not read this frame.
+          }
         }
+        if (!badge && context && video.videoWidth && video.videoHeight) {
+          const decode = await fallback;
+          if (scannerStreamRef.current !== stream) return;
+          if (decode) {
+            const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+            const width = Math.max(1, Math.round(video.videoWidth * scale));
+            const height = Math.max(1, Math.round(video.videoHeight * scale));
+            if (canvas.width !== width || canvas.height !== height) {
+              canvas.width = width;
+              canvas.height = height;
+            }
+            try {
+              context.drawImage(video, 0, 0, width, height);
+              const frame = context.getImageData(0, 0, width, height);
+              const code = decode(frame.data, width, height, { inversionAttempts: "attemptBoth" });
+              if (code && isBadge(code.data)) badge = code.data;
+            } catch {
+              // A camera frame can become unavailable while it is being read.
+            }
+          }
+        }
+        if (scannerStreamRef.current !== stream) return;
+        if (badge) processBadgeValue(badge);
         if (scannerStreamRef.current === stream) {
           scannerTimerRef.current = window.setTimeout(detect, 150);
         }
@@ -21607,7 +21639,7 @@ export default function Home() {
                     </button>
                   </div>
                   <p className="scanner-help">
-                    Keep the full QR code in view. For a handheld scanner,
+                    The camera reads automatically when the full QR code is in view. For a handheld scanner,
                     scan into Badge value and press Enter if the scanner does not submit automatically.
                   </p>
                 </section>
